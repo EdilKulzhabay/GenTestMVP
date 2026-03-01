@@ -17,7 +17,13 @@ export const PrivateRoute: React.FC<PrivateRouteProps> = ({ roles }) => {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace state={{ from: location }} />;
+    return (
+      <Navigate
+        to="/welcome"
+        replace
+        state={{ returnUrl: location.pathname + location.search }}
+      />
+    );
   }
 
   if (roles && user && !roles.includes(user.role)) {

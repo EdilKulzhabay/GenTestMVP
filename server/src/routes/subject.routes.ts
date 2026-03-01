@@ -10,8 +10,45 @@ import { authenticate, isAdmin, asyncHandler, validate } from '../middlewares';
 
 const router = Router();
 
-// Все маршруты требуют аутентификации
+/**
+ * Публичные маршруты (для гостевого режима)
+ */
+router.get(
+  '/',
+  asyncHandler(subjectController.getAllSubjects.bind(subjectController))
+);
+
+router.get(
+  '/:id',
+  [
+    param('id')
+      .isMongoId()
+      .withMessage('Invalid subject ID')
+  ],
+  validate,
+  asyncHandler(subjectController.getSubjectById.bind(subjectController))
+);
+
+// Защищённые маршруты
 router.use(authenticate);
+
+/**
+ * @route   POST /subjects/import
+ * @desc    Импорт предмета целиком (с книгами, главами, темами, параграфами)
+ * @access  Admin only
+ */
+router.post(
+  '/import',
+  isAdmin,
+  [
+    body('title')
+      .trim()
+      .isLength({ min: 1, max: 200 })
+      .withMessage('Title is required')
+  ],
+  validate,
+  asyncHandler(subjectController.importSubject.bind(subjectController))
+);
 
 /**
  * @route   POST /subjects
@@ -34,32 +71,6 @@ router.post(
   ],
   validate,
   asyncHandler(subjectController.createSubject.bind(subjectController))
-);
-
-/**
- * @route   GET /subjects
- * @desc    Получить все предметы
- * @access  Private (authenticated users)
- */
-router.get(
-  '/',
-  asyncHandler(subjectController.getAllSubjects.bind(subjectController))
-);
-
-/**
- * @route   GET /subjects/:id
- * @desc    Получить предмет по ID с полной структурой
- * @access  Private (authenticated users)
- */
-router.get(
-  '/:id',
-  [
-    param('id')
-      .isMongoId()
-      .withMessage('Invalid subject ID')
-  ],
-  validate,
-  asyncHandler(subjectController.getSubjectById.bind(subjectController))
 );
 
 /**

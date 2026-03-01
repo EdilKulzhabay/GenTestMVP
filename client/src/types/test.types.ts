@@ -66,10 +66,10 @@ export interface SubmitTestResponse {
 
 export interface TestHistoryItem {
   _id: string;
-  testId: string;
-  scorePercent: number;
+  subjectId: { _id: string; title: string } | string;
+  bookId: string;
+  chapterId?: string;
+  result: TestResultSummary;
+  aiFeedback: AiFeedback;
   createdAt: string;
-  subjectTitle?: string;
-  bookTitle?: string;
-  chapterTitle?: string;
 }

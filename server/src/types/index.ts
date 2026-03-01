@@ -107,6 +107,7 @@ export interface IUser {
   _id?: Types.ObjectId;
   fullName: string;
   userName: string;
+  email?: string;
   password: string;
   role: UserRole;
   testHistory: ITestHistory[];
@@ -146,8 +147,14 @@ export interface ITest {
 // Auth DTOs
 export interface IRegisterDTO {
   fullName: string;
+  email: string;
   userName: string;
   password: string;
+}
+
+export interface IVerifyEmailDTO {
+  email: string;
+  code: string;
 }
 
 export interface ILoginDTO {

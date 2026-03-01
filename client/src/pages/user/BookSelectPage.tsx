@@ -6,6 +6,7 @@ import { Loader } from '../../components/ui/Loader';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
 import { Button } from '../../components/ui/Button';
 import { getApiErrorMessage } from '../../utils/error';
+import { useGuestMode } from '../../hooks/useGuestMode';
 
 interface LocationState {
   subjectId?: string;
@@ -14,6 +15,7 @@ interface LocationState {
 export const BookSelectPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { basePath } = useGuestMode();
   const state = location.state as LocationState | null;
   const subjectId = state?.subjectId;
 
@@ -50,7 +52,7 @@ export const BookSelectPage: React.FC = () => {
     return (
       <div className="card space-y-3">
         <p className="text-sm text-slate-600">Сначала выберите предмет.</p>
-        <Link to="/user/subjects">
+        <Link to={`${basePath}/subjects`}>
           <Button>Перейти к выбору предмета</Button>
         </Link>
       </div>
@@ -130,7 +132,7 @@ export const BookSelectPage: React.FC = () => {
 
           <Button
             onClick={() =>
-              navigate('/user/test/start', {
+              navigate(`${basePath}/test/start`, {
                 state: {
                   subjectId,
                   bookId: selectedBook._id,

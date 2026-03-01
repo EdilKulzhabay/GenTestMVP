@@ -7,369 +7,127 @@ import {
   IAddTopicDTO,
   IAddParagraphDTO
 } from '../types';
-
-/**
- * SUBJECT CONTROLLER
- * Контроллер для управления образовательным контентом
- * 
- * Endpoints:
- * - POST   /subjects                    - создать предмет (admin)
- * - GET    /subjects                    - получить все предметы
- * - GET    /subjects/:id                - получить предмет по ID
- * - POST   /subjects/:id/books          - добавить книгу (admin)
- * - POST   /books/:bookId/chapters      - добавить главу (admin)
- * - POST   /chapters/:chapterId/topics  - добавить тему (admin)
- * - POST   /topics/:topicId/paragraphs  - добавить параграф (admin)
- */
+import { success, AppError } from '../utils';
 
 class SubjectController {
-  /**
-   * Создать новый предмет
-   * POST /subjects
-   * Body: { title, description? }
-   * Access: Admin only
-   */
+  private async findSubject(id: string) {
+    const subject = await Subject.findById(id);
+    if (!subject) throw AppError.notFound('Subject not found');
+    return subject;
+  }
+
+  /** POST /subjects */
   async createSubject(req: Request, res: Response): Promise<void> {
-    try {
-      const { title, description }: ICreateSubjectDTO = req.body;
-
-      const subject = await Subject.create({
-        title,
-        description,
-        books: []
-      });
-
-      res.status(201).json({
-        success: true,
-        message: 'Subject created successfully',
-        data: subject
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to create subject',
-        error: error.message
-      });
-    }
+    const { title, description }: ICreateSubjectDTO = req.body;
+    const subject = await Subject.create({ title, description, books: [] });
+    success(res, subject, 'Subject created successfully', 201);
   }
 
-  /**
-   * Получить все предметы
-   * GET /subjects
-   * Access: Public (authenticated users)
-   */
+  /** POST /subjects/import — импорт предмета целиком с книгами, главами, темами, параграфами */
+  async importSubject(req: Request, res: Response): Promise<void> {
+    const { title, description, books } = req.body;
+    if (!title) throw AppError.badRequest('title is required');
+
+    const existing = await Subject.findOne({ title: title.trim() });
+    if (existing) throw AppError.badRequest(`Subject "${title}" already exists`);
+
+    const subject = await Subject.create({
+      title: title.trim(),
+      description: description || '',
+      books: books || []
+    });
+
+    const bookCount = subject.books?.length ?? 0;
+    const chapterCount = subject.books.reduce((s: number, b: any) => s + (b.chapters?.length ?? 0), 0);
+    const topicCount = subject.books.reduce(
+      (s: number, b: any) => s + b.chapters.reduce((cs: number, c: any) => cs + (c.topics?.length ?? 0), 0), 0
+    );
+    const paragraphCount = subject.books.reduce(
+      (s: number, b: any) => s + b.chapters.reduce(
+        (cs: number, c: any) => cs + c.topics.reduce(
+          (ts: number, t: any) => ts + (t.paragraphs?.length ?? 0), 0
+        ), 0
+      ), 0
+    );
+
+    success(res, {
+      subject,
+      stats: { books: bookCount, chapters: chapterCount, topics: topicCount, paragraphs: paragraphCount }
+    }, `Imported: ${bookCount} books, ${chapterCount} chapters, ${topicCount} topics, ${paragraphCount} paragraphs`, 201);
+  }
+
+  /** GET /subjects */
   async getAllSubjects(_req: Request, res: Response): Promise<void> {
-    try {
-      const subjects = await Subject.find().select('title description createdAt updatedAt');
-
-      res.status(200).json({
-        success: true,
-        data: subjects
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to fetch subjects',
-        error: error.message
-      });
-    }
+    const subjects = await Subject.find().select('title description books createdAt updatedAt');
+    success(res, subjects);
   }
 
-  /**
-   * Получить предмет по ID с полной структурой
-   * GET /subjects/:id
-   * Access: Public (authenticated users)
-   */
+  /** GET /subjects/:id */
   async getSubjectById(req: Request, res: Response): Promise<void> {
-    try {
-      const { id } = req.params;
-
-      const subject = await Subject.findById(id);
-
-      if (!subject) {
-        res.status(404).json({
-          success: false,
-          message: 'Subject not found'
-        });
-        return;
-      }
-
-      res.status(200).json({
-        success: true,
-        data: subject
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to fetch subject',
-        error: error.message
-      });
-    }
+    const subject = await this.findSubject(req.params.id);
+    success(res, subject);
   }
 
-  /**
-   * Добавить книгу к предмету
-   * POST /subjects/:id/books
-   * Body: { title, author? }
-   * Access: Admin only
-   */
+  /** POST /subjects/:id/books */
   async addBook(req: Request, res: Response): Promise<void> {
-    try {
-      const { id } = req.params;
-      const { title, author }: IAddBookDTO = req.body;
-
-      const subject = await Subject.findById(id);
-
-      if (!subject) {
-        res.status(404).json({
-          success: false,
-          message: 'Subject not found'
-        });
-        return;
-      }
-
-      subject.books.push({
-        title,
-        author,
-        chapters: []
-      });
-
-      await subject.save();
-
-      res.status(201).json({
-        success: true,
-        message: 'Book added successfully',
-        data: subject
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to add book',
-        error: error.message
-      });
-    }
+    const subject = await this.findSubject(req.params.id);
+    const { title, author }: IAddBookDTO = req.body;
+    subject.books.push({ title, author, chapters: [] });
+    await subject.save();
+    success(res, subject, 'Book added successfully', 201);
   }
 
-  /**
-   * Добавить главу к книге
-   * POST /books/:bookId/chapters
-   * Body: { title, order }
-   * Params: subjectId (query), bookId (params)
-   * Access: Admin only
-   */
+  /** POST /subjects/books/:bookId/chapters */
   async addChapter(req: Request, res: Response): Promise<void> {
-    try {
-      const { bookId } = req.params;
-      const { subjectId } = req.query;
-      const { title, order }: IAddChapterDTO = req.body;
+    const { subjectId } = req.query;
+    if (!subjectId) throw AppError.badRequest('subjectId is required in query params');
 
-      if (!subjectId) {
-        res.status(400).json({
-          success: false,
-          message: 'subjectId is required in query params'
-        });
-        return;
-      }
+    const subject = await this.findSubject(String(subjectId));
+    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
 
-      const subject = await Subject.findById(subjectId);
-
-      if (!subject) {
-        res.status(404).json({
-          success: false,
-          message: 'Subject not found'
-        });
-        return;
-      }
-
-      const book = subject.books.find((item) => item._id?.toString() === bookId);
-
-      if (!book) {
-        res.status(404).json({
-          success: false,
-          message: 'Book not found'
-        });
-        return;
-      }
-
-      book.chapters.push({
-        title,
-        order,
-        topics: []
-      });
-
-      await subject.save();
-
-      res.status(201).json({
-        success: true,
-        message: 'Chapter added successfully',
-        data: subject
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to add chapter',
-        error: error.message
-      });
-    }
+    const { title, order }: IAddChapterDTO = req.body;
+    book.chapters.push({ title, order, topics: [] });
+    await subject.save();
+    success(res, subject, 'Chapter added successfully', 201);
   }
 
-  /**
-   * Добавить тему к главе
-   * POST /chapters/:chapterId/topics
-   * Body: { title }
-   * Query: subjectId, bookId, chapterId
-   * Access: Admin only
-   */
+  /** POST /subjects/chapters/:chapterId/topics */
   async addTopic(req: Request, res: Response): Promise<void> {
-    try {
-      const { chapterId } = req.params;
-      const { subjectId, bookId } = req.query;
-      const { title }: IAddTopicDTO = req.body;
+    const { subjectId, bookId } = req.query;
+    if (!subjectId || !bookId) throw AppError.badRequest('subjectId and bookId are required in query params');
 
-      if (!subjectId || !bookId) {
-        res.status(400).json({
-          success: false,
-          message: 'subjectId and bookId are required in query params'
-        });
-        return;
-      }
+    const subject = await this.findSubject(String(subjectId));
+    const book = subject.books.find((b) => b._id?.toString() === String(bookId));
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    if (!chapter) throw AppError.notFound('Chapter not found');
 
-      const subject = await Subject.findById(subjectId);
-
-      if (!subject) {
-        res.status(404).json({
-          success: false,
-          message: 'Subject not found'
-        });
-        return;
-      }
-
-      const normalizedBookId = String(bookId);
-      const book = subject.books.find((item) => item._id?.toString() === normalizedBookId);
-
-      if (!book) {
-        res.status(404).json({
-          success: false,
-          message: 'Book not found'
-        });
-        return;
-      }
-
-      const normalizedChapterId = String(chapterId);
-      const chapter = book.chapters.find((item) => item._id?.toString() === normalizedChapterId);
-
-      if (!chapter) {
-        res.status(404).json({
-          success: false,
-          message: 'Chapter not found'
-        });
-        return;
-      }
-
-      chapter.topics.push({
-        title,
-        paragraphs: []
-      });
-
-      await subject.save();
-
-      res.status(201).json({
-        success: true,
-        message: 'Topic added successfully',
-        data: subject
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to add topic',
-        error: error.message
-      });
-    }
+    const { title }: IAddTopicDTO = req.body;
+    chapter.topics.push({ title, paragraphs: [] });
+    await subject.save();
+    success(res, subject, 'Topic added successfully', 201);
   }
 
-  /**
-   * Добавить параграф к теме
-   * POST /topics/:topicId/paragraphs
-   * Body: { order, content: { text, pages, metadata } }
-   * Query: subjectId, bookId, chapterId, topicId
-   * Access: Admin only
-   */
+  /** POST /subjects/topics/:topicId/paragraphs */
   async addParagraph(req: Request, res: Response): Promise<void> {
-    try {
-      const { topicId } = req.params;
-      const { subjectId, bookId, chapterId } = req.query;
-      const { order, content }: IAddParagraphDTO = req.body;
-
-      if (!subjectId || !bookId || !chapterId) {
-        res.status(400).json({
-          success: false,
-          message: 'subjectId, bookId, and chapterId are required in query params'
-        });
-        return;
-      }
-
-      const subject = await Subject.findById(subjectId);
-
-      if (!subject) {
-        res.status(404).json({
-          success: false,
-          message: 'Subject not found'
-        });
-        return;
-      }
-
-      const normalizedBookId = String(bookId);
-      const book = subject.books.find((item) => item._id?.toString() === normalizedBookId);
-
-      if (!book) {
-        res.status(404).json({
-          success: false,
-          message: 'Book not found'
-        });
-        return;
-      }
-
-      const normalizedChapterId = String(chapterId);
-      const chapter = book.chapters.find((item) => item._id?.toString() === normalizedChapterId);
-
-      if (!chapter) {
-        res.status(404).json({
-          success: false,
-          message: 'Chapter not found'
-        });
-        return;
-      }
-
-      const normalizedTopicId = String(topicId);
-      const topic = chapter.topics.find((item) => item._id?.toString() === normalizedTopicId);
-
-      if (!topic) {
-        res.status(404).json({
-          success: false,
-          message: 'Topic not found'
-        });
-        return;
-      }
-
-      topic.paragraphs.push({
-        order,
-        content
-      });
-
-      await subject.save();
-
-      res.status(201).json({
-        success: true,
-        message: 'Paragraph added successfully',
-        data: subject
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to add paragraph',
-        error: error.message
-      });
+    const { subjectId, bookId, chapterId } = req.query;
+    if (!subjectId || !bookId || !chapterId) {
+      throw AppError.badRequest('subjectId, bookId, and chapterId are required in query params');
     }
+
+    const subject = await this.findSubject(String(subjectId));
+    const book = subject.books.find((b) => b._id?.toString() === String(bookId));
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find((c) => c._id?.toString() === String(chapterId));
+    if (!chapter) throw AppError.notFound('Chapter not found');
+    const topic = chapter.topics.find((t) => t._id?.toString() === req.params.topicId);
+    if (!topic) throw AppError.notFound('Topic not found');
+
+    const { order, content }: IAddParagraphDTO = req.body;
+    topic.paragraphs.push({ order, content });
+    await subject.save();
+    success(res, subject, 'Paragraph added successfully', 201);
   }
 }
 

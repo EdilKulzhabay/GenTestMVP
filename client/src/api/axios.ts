@@ -13,8 +13,10 @@ axiosInstance.interceptors.response.use(
   (error) => {
     if (error?.response?.status === 401) {
       authStore.logout();
-      if (window.location.pathname !== '/login') {
-        window.location.assign('/login');
+      const path = window.location.pathname;
+      if (!path.startsWith('/welcome') && !path.startsWith('/login') && !path.startsWith('/register')) {
+        const returnUrl = encodeURIComponent(path + window.location.search);
+        window.location.assign(`/welcome?returnUrl=${returnUrl}`);
       }
     }
     return Promise.reject(error);

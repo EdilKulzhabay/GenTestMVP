@@ -3,6 +3,8 @@ import authRoutes from './auth.routes';
 import subjectRoutes from './subject.routes';
 import testRoutes from './test.routes';
 import userRoutes from './user.routes';
+import { ROUTES } from '../config/constants';
+import { success } from '../utils';
 
 /**
  * ROUTES INDEX
@@ -11,19 +13,13 @@ import userRoutes from './user.routes';
 
 const router = Router();
 
-// API версия
-router.use('/auth', authRoutes);
-router.use('/subjects', subjectRoutes);
-router.use('/tests', testRoutes);
-router.use('/users', userRoutes);
+router.use(ROUTES.AUTH, authRoutes);
+router.use(ROUTES.SUBJECTS, subjectRoutes);
+router.use(ROUTES.TESTS, testRoutes);
+router.use(ROUTES.USERS, userRoutes);
 
-// Health check endpoint
-router.get('/health', (_req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'API is running',
-    timestamp: new Date().toISOString()
-  });
+router.get(ROUTES.HEALTH, (_req, res) => {
+  success(res, { timestamp: new Date().toISOString() }, 'API is running');
 });
 
 export default router;

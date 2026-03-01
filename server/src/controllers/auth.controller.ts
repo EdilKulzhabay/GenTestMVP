@@ -1,196 +1,141 @@
 import { Request, Response } from 'express';
-import { User } from '../models';
-import { IRegisterDTO, ILoginDTO, IAuthResponse, UserRole } from '../types';
-import { generateToken } from '../utils';
-
-/**
- * AUTH CONTROLLER
- * Контроллер для аутентификации пользователей
- * 
- * Endpoints:
- * - POST /auth/register - регистрация нового пользователя
- * - POST /auth/login - вход в систему
- */
+import { User, PendingRegistration } from '../models';
+import { IRegisterDTO, IVerifyEmailDTO, ILoginDTO, IAuthResponse, UserRole } from '../types';
+import { generateToken, success, AppError } from '../utils';
+import { sendVerificationCode } from '../services/email.service';
 
 class AuthController {
   private setAuthCookie(res: Response, token: string): void {
     const isProduction = process.env.NODE_ENV === 'production';
-    const maxAge = 7 * 24 * 60 * 60 * 1000;
-
     res.cookie('token', token, {
       httpOnly: true,
       sameSite: 'lax',
       secure: isProduction,
-      maxAge
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
   }
-  /**
-   * Регистрация нового пользователя
-   * POST /auth/register
-   * 
-   * Body: { fullName, userName, password }
-   * Returns: { token, user }
-   */
+
+  private buildAuthResponse(user: any): IAuthResponse {
+    const token = generateToken({ userId: user._id!.toString(), role: user.role });
+    return {
+      token,
+      user: {
+        id: user._id!.toString(),
+        fullName: user.fullName,
+        userName: user.userName,
+        role: user.role
+      }
+    };
+  }
+
+  /** POST /auth/register — шаг 1: отправка кода на email */
   async register(req: Request, res: Response): Promise<void> {
-    try {
-      const { fullName, userName, password }: IRegisterDTO = req.body;
+    const { fullName, email, userName, password }: IRegisterDTO = req.body;
+    const emailLower = email.toLowerCase().trim();
+    const userNameLower = userName.toLowerCase().trim();
 
-      // Проверяем, существует ли пользователь
-      const existingUser = await User.findOne({ userName: userName.toLowerCase() });
-      if (existingUser) {
-        res.status(400).json({
-          success: false,
-          message: 'User with this userName already exists'
-        });
-        return;
-      }
+    const existing = await User.findOne({
+      $or: [{ userName: userNameLower }, { email: emailLower }]
+    });
+    if (existing) throw AppError.badRequest('User with this email or userName already exists');
 
-      // Создаем нового пользователя
-      // Пароль автоматически хешируется в pre-save hook модели
-      const user = await User.create({
-        fullName,
-        userName: userName.toLowerCase(),
-        password,
-        role: UserRole.USER,
-        testHistory: []
-      });
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires = new Date(Date.now() + 15 * 60 * 1000);
 
-      // Генерируем JWT токен
-      const token = generateToken({
-        userId: user._id!.toString(),
-        role: user.role
-      });
+    await PendingRegistration.deleteMany({ email: emailLower });
+    await PendingRegistration.create({
+      email: emailLower,
+      fullName,
+      userName: userNameLower,
+      password,
+      verificationCode: code,
+      verificationCodeExpires: expires
+    });
 
-      // Формируем ответ
-      const response: IAuthResponse = {
-        token,
-        user: {
-          id: user._id!.toString(),
-          fullName: user.fullName,
-          userName: user.userName,
-          role: user.role
-        }
-      };
-
-      this.setAuthCookie(res, token);
-
-      res.status(201).json({
-        success: true,
-        message: 'User registered successfully',
-        data: response
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: 'Registration failed',
-        error: error.message
-      });
-    }
+    await sendVerificationCode(emailLower, code);
+    success(res, undefined, 'Verification code sent to email');
   }
 
-  /**
-   * Вход в систему
-   * POST /auth/login
-   * 
-   * Body: { userName, password }
-   * Returns: { token, user }
-   */
+  /** POST /auth/verify-email — шаг 2: подтверждение кода */
+  async verifyEmail(req: Request, res: Response): Promise<void> {
+    const { email, code }: IVerifyEmailDTO = req.body;
+    const emailLower = email.toLowerCase().trim();
+
+    const pending = await PendingRegistration.findOne({ email: emailLower });
+    if (!pending) throw AppError.badRequest('Invalid or expired verification code');
+    if (pending.verificationCode !== code.trim()) throw AppError.badRequest('Invalid verification code');
+    if (new Date() > pending.verificationCodeExpires) {
+      await PendingRegistration.deleteOne({ _id: pending._id });
+      throw AppError.badRequest('Verification code expired. Please register again.');
+    }
+
+    const existing = await User.findOne({
+      $or: [{ userName: pending.userName }, { email: pending.email }]
+    });
+    if (existing) {
+      await PendingRegistration.deleteOne({ _id: pending._id });
+      throw AppError.badRequest('User already exists');
+    }
+
+    const user = await User.create({
+      fullName: pending.fullName,
+      userName: pending.userName,
+      email: pending.email,
+      password: pending.password as string,
+      role: UserRole.USER,
+      testHistory: []
+    });
+    await PendingRegistration.deleteOne({ _id: pending._id });
+
+    const response = this.buildAuthResponse(user);
+    this.setAuthCookie(res, response.token);
+    success(res, response, 'User registered successfully', 201);
+  }
+
+  /** POST /auth/login */
   async login(req: Request, res: Response): Promise<void> {
-    try {
-      const { userName, password }: ILoginDTO = req.body;
+    const { userName, password }: ILoginDTO = req.body;
 
-      // Находим пользователя (с паролем, который по умолчанию не возвращается)
-      const user = await User.findOne({ 
-        userName: userName.toLowerCase() 
-      }).select('+password');
+    const user = await User.findOne({ userName: userName.toLowerCase() }).select('+password');
+    if (!user) throw AppError.unauthorized('Invalid credentials');
 
-      if (!user) {
-        res.status(401).json({
-          success: false,
-          message: 'Invalid credentials'
-        });
-        return;
-      }
+    const valid = await user.comparePassword(password);
+    if (!valid) throw AppError.unauthorized('Invalid credentials');
 
-      // Проверяем пароль
-      const isPasswordValid = await user.comparePassword(password);
-      if (!isPasswordValid) {
-        res.status(401).json({
-          success: false,
-          message: 'Invalid credentials'
-        });
-        return;
-      }
-
-      // Генерируем JWT токен
-      const token = generateToken({
-        userId: user._id!.toString(),
-        role: user.role
-      });
-
-      // Формируем ответ
-      const response: IAuthResponse = {
-        token,
-        user: {
-          id: user._id!.toString(),
-          fullName: user.fullName,
-          userName: user.userName,
-          role: user.role
-        }
-      };
-
-      this.setAuthCookie(res, token);
-
-      res.status(200).json({
-        success: true,
-        message: 'Login successful',
-        data: response
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: 'Login failed',
-        error: error.message
-      });
-    }
+    const response = this.buildAuthResponse(user);
+    this.setAuthCookie(res, response.token);
+    success(res, response, 'Login successful');
   }
 
-  /**
-   * Получение информации о текущем пользователе
-   * GET /auth/me
-   * Requires: Authentication
-   */
+  /** POST /auth/create-admin — создание админа напрямую (без email-верификации) */
+  async createAdmin(req: Request, res: Response): Promise<void> {
+    const { fullName, userName, password } = req.body;
+    const userNameLower = userName.toLowerCase().trim();
+
+    const existing = await User.findOne({ userName: userNameLower });
+    if (existing) throw AppError.badRequest('User with this userName already exists');
+
+    const user = await User.create({
+      fullName,
+      userName: userNameLower,
+      password,
+      role: UserRole.ADMIN,
+      testHistory: []
+    });
+
+    const response = this.buildAuthResponse(user);
+    this.setAuthCookie(res, response.token);
+    success(res, response, 'Admin created successfully', 201);
+  }
+
+  /** GET /auth/me */
   async getMe(req: Request, res: Response): Promise<void> {
-    try {
-      if (!req.user) {
-        res.status(401).json({
-          success: false,
-          message: 'Not authenticated'
-        });
-        return;
-      }
+    if (!req.user) throw AppError.unauthorized('Not authenticated');
 
-      const user = await User.findById(req.user.userId).select('-password');
-      
-      if (!user) {
-        res.status(404).json({
-          success: false,
-          message: 'User not found'
-        });
-        return;
-      }
+    const user = await User.findById(req.user.userId).select('-password');
+    if (!user) throw AppError.notFound('User not found');
 
-      res.status(200).json({
-        success: true,
-        data: user
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to fetch user data',
-        error: error.message
-      });
-    }
+    success(res, user);
   }
 }
 

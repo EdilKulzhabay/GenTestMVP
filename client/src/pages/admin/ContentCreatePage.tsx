@@ -8,6 +8,7 @@ import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { Button } from '../../components/ui/Button';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
+import { SuccessMessage } from '../../components/ui/SuccessMessage';
 import { Loader } from '../../components/ui/Loader';
 import { getApiErrorMessage } from '../../utils/error';
 
@@ -39,7 +40,7 @@ export const ContentCreatePage: React.FC = () => {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const {
     register,
@@ -70,12 +71,7 @@ export const ContentCreatePage: React.FC = () => {
 
   useEffect(() => {
     const loadSubject = async () => {
-      if (!subjectId) {
-        setBooks([]);
-        setChapters([]);
-        setTopics([]);
-        return;
-      }
+      if (!subjectId) { setBooks([]); setChapters([]); setTopics([]); return; }
       try {
         const subject = await subjectApi.getSubjectById(subjectId);
         setBooks(subject.books || []);
@@ -87,21 +83,14 @@ export const ContentCreatePage: React.FC = () => {
   }, [subjectId]);
 
   useEffect(() => {
-    if (!bookId) {
-      setChapters([]);
-      setTopics([]);
-      return;
-    }
-    const book = books.find((item) => item._id === bookId);
+    if (!bookId) { setChapters([]); setTopics([]); return; }
+    const book = books.find((b) => b._id === bookId);
     setChapters(book?.chapters || []);
   }, [bookId, books]);
 
   useEffect(() => {
-    if (!chapterId) {
-      setTopics([]);
-      return;
-    }
-    const chapter = chapters.find((item) => item._id === chapterId);
+    if (!chapterId) { setTopics([]); return; }
+    const chapter = chapters.find((c) => c._id === chapterId);
     setTopics(chapter?.topics || []);
   }, [chapterId, chapters]);
 
@@ -109,35 +98,25 @@ export const ContentCreatePage: React.FC = () => {
 
   const onSubmit = async (values: ContentForm) => {
     setServerError(null);
-    setSuccess(null);
+    setSuccessMsg(null);
     try {
       let targetTopicId = values.topicId;
 
       if (!targetTopicId) {
-        if (!values.topicTitle?.trim()) {
-          throw new Error('Укажите тему');
-        }
+        if (!values.topicTitle?.trim()) throw new Error('Укажите тему');
         const subject = await subjectApi.createTopic(values.subjectId, values.bookId, values.chapterId, {
           title: values.topicTitle.trim()
         });
-        const createdBook = subject.books.find((book) => book._id === values.bookId);
-        const createdChapter = createdBook?.chapters.find((chapter) => chapter._id === values.chapterId);
+        const createdBook = subject.books.find((b) => b._id === values.bookId);
+        const createdChapter = createdBook?.chapters.find((c) => c._id === values.chapterId);
         const createdTopic = createdChapter?.topics?.[createdChapter.topics.length - 1];
         targetTopicId = createdTopic?._id;
       }
 
-      if (!targetTopicId) {
-        throw new Error('Не удалось определить тему');
-      }
+      if (!targetTopicId) throw new Error('Не удалось определить тему');
 
-      const pages = values.pages
-        .split(',')
-        .map((page) => Number(page.trim()))
-        .filter((page) => !Number.isNaN(page));
-
-      const keywords = values.keywords
-        ? values.keywords.split(',').map((item) => item.trim()).filter(Boolean)
-        : [];
+      const pages = values.pages.split(',').map((p) => Number(p.trim())).filter((p) => !Number.isNaN(p));
+      const keywords = values.keywords ? values.keywords.split(',').map((k) => k.trim()).filter(Boolean) : [];
 
       await subjectApi.createParagraph(values.subjectId, values.bookId, values.chapterId, targetTopicId, {
         order: values.paragraphOrder,
@@ -152,87 +131,79 @@ export const ContentCreatePage: React.FC = () => {
         }
       });
 
-      setSuccess('Контент успешно добавлен');
+      setSuccessMsg('Контент успешно добавлен');
       reset();
     } catch (error) {
       setServerError(getApiErrorMessage(error));
     }
   };
 
-  if (loading) {
-    return <Loader />;
-  }
+  if (loading) return <Loader />;
 
   return (
-    <div className="card space-y-4">
-      <h1 className="section-title">Добавить контент</h1>
-      {serverError ? <ErrorMessage message={serverError} /> : null}
+    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h1 className="mb-1 text-lg font-semibold text-slate-900">Добавить контент</h1>
+      <p className="mb-6 text-sm text-slate-500">Параграф — единица учебного текста, из которого AI генерирует вопросы.</p>
+
       {subjects.length === 0 ? (
-        <div className="text-sm text-slate-600">Нет предметов для выбора.</div>
+        <p className="text-sm text-slate-500">Сначала создайте предмет, книгу и главу.</p>
       ) : (
         <form className="space-y-4" onSubmit={handleSubmit(onSubmit)}>
-          <Select label="Предмет" error={errors.subjectId?.message} {...register('subjectId')}>
-            <option value="">Выберите предмет</option>
-            {subjects.map((subject) => (
-              <option key={subject._id} value={subject._id}>
-                {subject.title}
-              </option>
-            ))}
-          </Select>
-          <Select label="Книга" error={errors.bookId?.message} {...register('bookId')}>
-            <option value="">Выберите книгу</option>
-            {books.map((book) => (
-              <option key={book._id} value={book._id}>
-                {book.title}
-              </option>
-            ))}
-          </Select>
-          <Select label="Глава" error={errors.chapterId?.message} {...register('chapterId')}>
-            <option value="">Выберите главу</option>
-            {chapters.map((chapter) => (
-              <option key={chapter._id} value={chapter._id}>
-                {chapter.title}
-              </option>
-            ))}
-          </Select>
-          <Select label="Тема (если существует)" {...register('topicId')}>
-            <option value="">Создать новую тему</option>
-            {topicOptions.map((topic) => (
-              <option key={topic._id} value={topic._id}>
-                {topic.title}
-              </option>
-            ))}
-          </Select>
-          <Input label="Название темы" error={errors.topicTitle?.message} {...register('topicTitle')} />
-          <Input
-            label="Порядок параграфа"
-            type="number"
-            error={errors.paragraphOrder?.message}
-            {...register('paragraphOrder')}
-          />
-          <Input
-            label="Текст параграфа"
-            error={errors.contentText?.message}
-            {...register('contentText')}
-          />
-          <Input
-            label="Страницы (через запятую)"
-            error={errors.pages?.message}
-            {...register('pages')}
-          />
-          <Input label="Ключевые слова" error={errors.keywords?.message} {...register('keywords')} />
-          <Select label="Сложность" error={errors.difficulty?.message} {...register('difficulty')}>
-            <option value="">Не указано</option>
-            <option value="easy">Легко</option>
-            <option value="medium">Средне</option>
-            <option value="hard">Сложно</option>
-          </Select>
-          <Input label="Источник" error={errors.source?.message} {...register('source')} />
-          {success ? (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-              {success}
-            </div>
-          ) : null}
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Select label="Предмет" error={errors.subjectId?.message} {...register('subjectId')}>
+              <option value="">Выберите</option>
+              {subjects.map((s) => <option key={s._id} value={s._id}>{s.title}</option>)}
+            </Select>
+            <Select label="Книга" error={errors.bookId?.message} {...register('bookId')}>
+              <option value="">Выберите</option>
+              {books.map((b) => <option key={b._id} value={b._id}>{b.title}</option>)}
+            </Select>
+            <Select label="Глава" error={errors.chapterId?.message} {...register('chapterId')}>
+              <option value="">Выберите</option>
+              {chapters.map((c) => <option key={c._id} value={c._id}>{c.title}</option>)}
+            </Select>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Select label="Существующая тема" {...register('topicId')}>
+              <option value="">Создать новую</option>
+              {topicOptions.map((t) => <option key={t._id} value={t._id}>{t.title}</option>)}
+            </Select>
+            <Input label="Или название новой темы" error={errors.topicTitle?.message} placeholder="Название темы" {...register('topicTitle')} />
+          </div>
+
+          <Input label="Порядок параграфа" type="number" placeholder="0" error={errors.paragraphOrder?.message} {...register('paragraphOrder')} />
+
+          <label className="flex w-full flex-col gap-2 text-sm font-medium text-slate-700">
+            <span>Текст параграфа</span>
+            <textarea
+              className={`w-full rounded-lg border px-3 py-2 text-sm text-slate-900 focus:outline-none ${
+                errors.contentText ? 'border-red-400 focus:border-red-500' : 'border-slate-200 focus:border-blue-500'
+              }`}
+              rows={6}
+              placeholder="Вставьте учебный текст..."
+              {...register('contentText')}
+            />
+            {errors.contentText && <span className="text-xs text-red-600">{errors.contentText.message}</span>}
+          </label>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input label="Страницы (через запятую)" placeholder="12, 13, 14" error={errors.pages?.message} {...register('pages')} />
+            <Input label="Ключевые слова" placeholder="алгебра, уравнения" {...register('keywords')} />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Select label="Сложность" {...register('difficulty')}>
+              <option value="">Не указано</option>
+              <option value="easy">Легко</option>
+              <option value="medium">Средне</option>
+              <option value="hard">Сложно</option>
+            </Select>
+            <Input label="Источник" placeholder="URL или название" {...register('source')} />
+          </div>
+
+          {serverError && <ErrorMessage message={serverError} />}
+          {successMsg && <SuccessMessage message={successMsg} />}
           <Button type="submit" isLoading={isSubmitting}>
             Сохранить
           </Button>

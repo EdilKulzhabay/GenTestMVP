@@ -5,9 +5,11 @@ import { Subject } from '../../types/subject.types';
 import { Loader } from '../../components/ui/Loader';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
 import { getApiErrorMessage } from '../../utils/error';
+import { useGuestMode } from '../../hooks/useGuestMode';
 
 export const SubjectSelectPage: React.FC = () => {
   const navigate = useNavigate();
+  const { basePath } = useGuestMode();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +44,7 @@ export const SubjectSelectPage: React.FC = () => {
             <button
               key={subject._id}
               className="card text-left transition hover:border-blue-200 hover:bg-blue-50"
-              onClick={() => navigate('/user/books', { state: { subjectId: subject._id } })}
+              onClick={() => navigate(`${basePath}/books`, { state: { subjectId: subject._id } })}
             >
               <h2 className="text-lg font-semibold text-slate-900">{subject.title}</h2>
               <p className="text-sm text-slate-600">{subject.description || 'Без описания'}</p>

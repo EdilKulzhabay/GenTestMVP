@@ -18,6 +18,11 @@ export const subjectApi = {
     return data.data;
   },
 
+  async importSubject(payload: Record<string, unknown>): Promise<{ subject: Subject; stats: { books: number; chapters: number; topics: number; paragraphs: number } }> {
+    const { data } = await axiosInstance.post<ApiResponse<{ subject: Subject; stats: { books: number; chapters: number; topics: number; paragraphs: number } }>>('/subjects/import', payload);
+    return data.data;
+  },
+
   async createBook(subjectId: string, payload: { title: string; author?: string }): Promise<Subject> {
     const { data } = await axiosInstance.post<ApiResponse<Subject>>(`/subjects/${subjectId}/books`, payload);
     return data.data;

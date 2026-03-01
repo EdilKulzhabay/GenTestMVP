@@ -8,6 +8,7 @@ import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { Button } from '../../components/ui/Button';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
+import { SuccessMessage } from '../../components/ui/SuccessMessage';
 import { Loader } from '../../components/ui/Loader';
 import { getApiErrorMessage } from '../../utils/error';
 
@@ -25,7 +26,7 @@ export const ChapterCreatePage: React.FC = () => {
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const {
     register,
@@ -54,10 +55,7 @@ export const ChapterCreatePage: React.FC = () => {
 
   useEffect(() => {
     const loadBooks = async () => {
-      if (!subjectId) {
-        setBooks([]);
-        return;
-      }
+      if (!subjectId) { setBooks([]); return; }
       try {
         const subject = await subjectApi.getSubjectById(subjectId);
         setBooks(subject.books || []);
@@ -70,54 +68,46 @@ export const ChapterCreatePage: React.FC = () => {
 
   const onSubmit = async (values: ChapterForm) => {
     setServerError(null);
-    setSuccess(null);
+    setSuccessMsg(null);
     try {
       await subjectApi.createChapter(values.subjectId, values.bookId, {
         title: values.title,
         order: values.order
       });
-      setSuccess('Глава успешно добавлена');
+      setSuccessMsg('Глава успешно добавлена');
       reset();
     } catch (error) {
       setServerError(getApiErrorMessage(error));
     }
   };
 
-  if (loading) {
-    return <Loader />;
-  }
+  if (loading) return <Loader />;
 
   return (
-    <div className="card space-y-4">
-      <h1 className="section-title">Добавить главу</h1>
-      {serverError ? <ErrorMessage message={serverError} /> : null}
+    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h1 className="mb-1 text-lg font-semibold text-slate-900">Добавить главу</h1>
+      <p className="mb-6 text-sm text-slate-500">Глава принадлежит книге и содержит темы.</p>
+
       {subjects.length === 0 ? (
-        <div className="text-sm text-slate-600">Нет предметов для выбора.</div>
+        <p className="text-sm text-slate-500">Сначала создайте предмет и книгу.</p>
       ) : (
         <form className="space-y-4" onSubmit={handleSubmit(onSubmit)}>
           <Select label="Предмет" error={errors.subjectId?.message} {...register('subjectId')}>
             <option value="">Выберите предмет</option>
-            {subjects.map((subject) => (
-              <option key={subject._id} value={subject._id}>
-                {subject.title}
-              </option>
+            {subjects.map((s) => (
+              <option key={s._id} value={s._id}>{s.title}</option>
             ))}
           </Select>
           <Select label="Книга" error={errors.bookId?.message} {...register('bookId')}>
             <option value="">Выберите книгу</option>
-            {books.map((book) => (
-              <option key={book._id} value={book._id}>
-                {book.title}
-              </option>
+            {books.map((b) => (
+              <option key={b._id} value={b._id}>{b.title}</option>
             ))}
           </Select>
-          <Input label="Название главы" error={errors.title?.message} {...register('title')} />
-          <Input label="Порядок" type="number" error={errors.order?.message} {...register('order')} />
-          {success ? (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-              {success}
-            </div>
-          ) : null}
+          <Input label="Название главы" placeholder="Например: Глава 1. Введение" error={errors.title?.message} {...register('title')} />
+          <Input label="Порядок" type="number" placeholder="0" error={errors.order?.message} {...register('order')} />
+          {serverError && <ErrorMessage message={serverError} />}
+          {successMsg && <SuccessMessage message={successMsg} />}
           <Button type="submit" isLoading={isSubmitting}>
             Сохранить
           </Button>

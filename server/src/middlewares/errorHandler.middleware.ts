@@ -1,16 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { Error as MongooseError } from 'mongoose';
-
-/**
- * ERROR HANDLER MIDDLEWARE
- * Централизованная обработка ошибок
- * 
- * Обрабатывает:
- * - Ошибки валидации Mongoose
- * - Ошибки дублирования (unique constraint)
- * - Ошибки cast (неверный формат ObjectId)
- * - Общие ошибки
- */
+import { AppError } from '../utils/AppError';
 
 interface CustomError extends Error {
   statusCode?: number;
@@ -19,19 +9,22 @@ interface CustomError extends Error {
   errors?: any;
 }
 
-/**
- * Централизованный обработчик ошибок
- * Должен быть последним middleware в цепочке
- */
 export const errorHandler = (
   err: CustomError,
   _req: Request,
   res: Response,
   _next: NextFunction
 ): void => {
-  console.error('❌ Error:', err);
+  if (process.env.NODE_ENV === 'development') {
+    console.error('❌ Error:', err.message);
+  }
 
-  // По умолчанию 500 Internal Server Error
+  // AppError — наши бизнес-ошибки, пробрасываем как есть
+  if (err instanceof AppError) {
+    res.status(err.statusCode).json({ success: false, message: err.message });
+    return;
+  }
+
   let statusCode = err.statusCode || 500;
   let message = err.message || 'Internal Server Error';
   let errors: any[] = [];

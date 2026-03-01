@@ -1,6 +1,12 @@
 import { axiosInstance } from './axios';
 import { ApiResponse } from '../types/api.types';
-import { AuthPayload, LoginRequest, RegisterRequest, User } from '../types/auth.types';
+import {
+  AuthPayload,
+  LoginRequest,
+  RegisterRequest,
+  VerifyEmailRequest,
+  User
+} from '../types/auth.types';
 
 export const authApi = {
   async login(payload: LoginRequest): Promise<User> {
@@ -8,8 +14,15 @@ export const authApi = {
     return data.data.user;
   },
 
-  async register(payload: RegisterRequest): Promise<User> {
-    const { data } = await axiosInstance.post<ApiResponse<AuthPayload>>('/auth/register', payload);
+  async register(payload: RegisterRequest): Promise<void> {
+    await axiosInstance.post('/auth/register', payload);
+  },
+
+  async verifyEmail(payload: VerifyEmailRequest): Promise<User> {
+    const { data } = await axiosInstance.post<ApiResponse<AuthPayload>>(
+      '/auth/verify-email',
+      payload
+    );
     return data.data.user;
   },
 

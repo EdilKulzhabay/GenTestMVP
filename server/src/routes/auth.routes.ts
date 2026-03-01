@@ -22,6 +22,10 @@ router.post(
       .trim()
       .isLength({ min: 2, max: 100 })
       .withMessage('Full name must be between 2 and 100 characters'),
+    body('email')
+      .trim()
+      .isEmail()
+      .withMessage('Valid email is required'),
     body('userName')
       .trim()
       .isLength({ min: 3, max: 50 })
@@ -34,6 +38,48 @@ router.post(
   ],
   validate,
   asyncHandler(authController.register.bind(authController))
+);
+
+router.post(
+  '/verify-email',
+  [
+    body('email')
+      .trim()
+      .isEmail()
+      .withMessage('Valid email is required'),
+    body('code')
+      .trim()
+      .isLength({ min: 6, max: 6 })
+      .withMessage('Code must be 6 digits')
+  ],
+  validate,
+  asyncHandler(authController.verifyEmail.bind(authController))
+);
+
+/**
+ * @route   POST /auth/create-admin
+ * @desc    Создание администратора (без email-верификации)
+ * @access  Public (защитить в production через env-секрет)
+ */
+router.post(
+  '/create-admin',
+  [
+    body('fullName')
+      .trim()
+      .isLength({ min: 2, max: 100 })
+      .withMessage('Full name must be between 2 and 100 characters'),
+    body('userName')
+      .trim()
+      .isLength({ min: 3, max: 50 })
+      .withMessage('Username must be between 3 and 50 characters')
+      .matches(/^[a-zA-Z0-9_]+$/)
+      .withMessage('Username can only contain letters, numbers and underscores'),
+    body('password')
+      .isLength({ min: 6 })
+      .withMessage('Password must be at least 6 characters long')
+  ],
+  validate,
+  asyncHandler(authController.createAdmin.bind(authController))
 );
 
 /**

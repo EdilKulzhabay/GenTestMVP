@@ -138,6 +138,13 @@ const UserSchema = new Schema<IUserDocument>({
     maxlength: 50,
     match: /^[a-zA-Z0-9_]+$/
   },
+  email: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    sparse: true,
+    unique: true
+  },
   password: { 
     type: String, 
     required: true,

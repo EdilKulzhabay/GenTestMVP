@@ -14,8 +14,14 @@ export interface LoginRequest {
 
 export interface RegisterRequest {
   fullName: string;
+  email: string;
   userName: string;
   password: string;
+}
+
+export interface VerifyEmailRequest {
+  email: string;
+  code: string;
 }
 
 export interface AuthPayload {

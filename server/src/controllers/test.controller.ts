@@ -8,390 +8,262 @@ import {
   IUserAnswer,
   ITestHistory
 } from '../types';
-
-/**
- * TEST CONTROLLER
- * Контроллер для работы с тестами
- * 
- * Endpoints:
- * - POST /tests/generate - генерация теста на основе контента
- * - POST /tests/submit   - отправка ответов и получение результатов
- * - GET  /tests/:id      - получение теста по ID
- */
+import { success, AppError } from '../utils';
 
 class TestController {
-  /**
-   * Генерация теста
-   * POST /tests/generate
-   * 
-   * Body: {
-   *   subjectId: string,
-   *   bookId: string,
-   *   chapterId?: string,
-   *   fullBook?: boolean
-   * }
-   * 
-   * Логика:
-   * 1. Получить контент из Subject
-   * 2. Проверить кеш (по хешу контента)
-   * 3. Если нет в кеше - генерировать через AI
-   * 4. Сохранить тест
-   * 5. Вернуть тест (без правильных ответов)
-   */
-  async generateTest(req: Request, res: Response): Promise<void> {
-    try {
-      const { subjectId, bookId, chapterId, fullBook }: IGenerateTestDTO = req.body;
-      const userId = req.user!.userId;
+  /** Собрать контент и метаданные из предмета/книги/главы */
+  private async resolveContent(dto: IGenerateTestDTO) {
+    const subject = await Subject.findById(dto.subjectId);
+    if (!subject) throw AppError.notFound('Subject not found');
 
-      // Получаем предмет
-      const subject = await Subject.findById(subjectId);
-      if (!subject) {
-        res.status(404).json({
-          success: false,
-          message: 'Subject not found'
-        });
-        return;
-      }
+    const book = subject.books.find((b) => b._id?.toString() === dto.bookId);
+    if (!book) throw AppError.notFound('Book not found');
 
-      // Получаем книгу
-      const book = subject.books.find((item) => item._id?.toString() === bookId);
-      if (!book) {
-        res.status(404).json({
-          success: false,
-          message: 'Book not found'
-        });
-        return;
-      }
+    let contentText = '';
+    let chapterTitle = '';
+    const topics: string[] = [];
 
-      // Собираем контент в зависимости от параметров
-      let contentText = '';
-      let chapterTitle = '';
-      const topics: string[] = [];
-
-      if (fullBook || !chapterId) {
-        // Генерация по всей книге
-        contentText = subject.getBookContent(bookId);
-        chapterTitle = 'Вся книга';
-        book.chapters.forEach((ch) => {
-          ch.topics.forEach((t) => topics.push(t.title));
-        });
-      } else {
-        // Генерация по конкретной главе
-        const chapter = book.chapters.find((item) => item._id?.toString() === chapterId);
-        if (!chapter) {
-          res.status(404).json({
-            success: false,
-            message: 'Chapter not found'
-          });
-          return;
-        }
-        contentText = subject.getChapterContent(bookId, chapterId);
-        chapterTitle = chapter.title;
-        chapter.topics.forEach((t) => topics.push(t.title));
-      }
-
-      if (!contentText || contentText.trim().length === 0) {
-        res.status(400).json({
-          success: false,
-          message: 'No content available for test generation'
-        });
-        return;
-      }
-
-      // Подготавливаем метаданные для AI
-      const contentForAI: IContentForAI = {
-        text: contentText,
-        metadata: {
-          subjectTitle: subject.title,
-          bookTitle: book.title,
-          chapterTitle: fullBook ? undefined : chapterTitle,
-          topics
-        }
-      };
-
-      // Получаем историю вопросов пользователя для избежания повторений
-      const user = await User.findById(userId);
-      const previousQuestions = user?.getAllQuestionHashes(subjectId, bookId) || [];
-
-      // Генерируем тест через AI
-      const generatedTest = await aiService.generateTest(contentForAI, previousQuestions);
-
-      if (chapterId) {
-        generatedTest.questions = generatedTest.questions.map((question) => ({
-          ...question,
-          relatedContent: {
-            ...question.relatedContent,
-            chapterId: chapterId as any
-          }
-        }));
-      }
-
-      // Проверяем кеш - может уже есть тест с таким же контентом
-      const useCache = !process.env.OPENAI_API_KEY;
-      const cachedTest = useCache
-        ? await Test.findOne({
-            subjectId,
-            bookId,
-            chapterId: chapterId || { $exists: false },
-            sourceContentHash: generatedTest.sourceContentHash
-          }).sort({ createdAt: -1 })
-        : null;
-
-      let test;
-      
-      if (cachedTest) {
-        // Используем кешированный тест
-        test = cachedTest;
-        console.log('📦 Using cached test');
-      } else {
-        // Сохраняем новый тест
-        test = await Test.create({
-          subjectId,
-          bookId,
-          chapterId: chapterId || undefined,
-          questions: generatedTest.questions,
-          sourceContentHash: generatedTest.sourceContentHash
-        });
-        console.log('✨ Generated new test');
-      }
-
-      // Возвращаем тест БЕЗ правильных ответов и объяснений
-      const testForUser = {
-        _id: test._id,
-        subjectId: test.subjectId,
-        bookId: test.bookId,
-        chapterId: test.chapterId,
-        questions: test.questions.map(q => ({
-          questionText: q.questionText,
-          options: q.options,
-          // НЕ отправляем correctOption и aiExplanation
-        })),
-        createdAt: test.createdAt
-      };
-
-      res.status(201).json({
-        success: true,
-        message: 'Test generated successfully',
-        data: testForUser
-      });
-    } catch (error: any) {
-      console.error('Error generating test:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to generate test',
-        error: error.message
-      });
+    if (dto.fullBook || !dto.chapterId) {
+      contentText = subject.getBookContent(dto.bookId);
+      chapterTitle = 'Вся книга';
+      book.chapters.forEach((ch) => ch.topics.forEach((t) => topics.push(t.title)));
+    } else {
+      const chapter = book.chapters.find((c) => c._id?.toString() === dto.chapterId);
+      if (!chapter) throw AppError.notFound('Chapter not found');
+      contentText = subject.getChapterContent(dto.bookId, dto.chapterId!);
+      chapterTitle = chapter.title;
+      chapter.topics.forEach((t) => topics.push(t.title));
     }
+
+    if (!contentText?.trim()) {
+      throw AppError.badRequest('No content available for test generation');
+    }
+
+    const contentForAI: IContentForAI = {
+      text: contentText,
+      metadata: {
+        subjectTitle: subject.title,
+        bookTitle: book.title,
+        chapterTitle: dto.fullBook ? undefined : chapterTitle,
+        topics
+      }
+    };
+
+    return { subject, book, contentForAI };
   }
 
-  /**
-   * Отправка ответов на тест
-   * POST /tests/submit
-   * 
-   * Body: {
-   *   testId: string,
-   *   answers: [{ questionText: string, selectedOption: string }]
-   * }
-   * 
-   * Логика:
-   * 1. Получить тест с правильными ответами
-   * 2. Проверить ответы пользователя
-   * 3. Отправить в AI для анализа и feedback
-   * 4. Сохранить результаты в историю пользователя
-   * 5. Вернуть результаты с feedback
-   */
-  async submitTest(req: Request, res: Response): Promise<void> {
-    try {
-      const { testId, answers }: ISubmitTestDTO = req.body;
-      const userId = req.user!.userId;
-
-      // Получаем тест
-      const test = await Test.findById(testId);
-      if (!test) {
-        res.status(404).json({
-          success: false,
-          message: 'Test not found'
-        });
-        return;
-      }
-
-      // Проверяем количество ответов
-      if (answers.length !== test.questions.length) {
-        res.status(400).json({
-          success: false,
-          message: `Expected ${test.questions.length} answers, received ${answers.length}`
-        });
-        return;
-      }
-
-      // Проверяем ответы
-      const userAnswers: IUserAnswer[] = [];
-      let correctCount = 0;
-
-      for (let i = 0; i < test.questions.length; i++) {
-        const question = test.questions[i];
-        const userAnswer = answers.find(a => a.questionText === question.questionText);
-
-        if (!userAnswer) {
-          res.status(400).json({
-            success: false,
-            message: `Missing answer for question: "${question.questionText}"`
-          });
-          return;
-        }
-
-        const isCorrect = userAnswer.selectedOption === question.correctOption;
-        if (isCorrect) correctCount++;
-
-        userAnswers.push({
-          question: question.questionText,
-          selectedOption: userAnswer.selectedOption,
-          isCorrect
-        });
-      }
-
-      // Вычисляем результат
-      const totalQuestions = test.questions.length;
-      const scorePercent = Math.round((correctCount / totalQuestions) * 100);
-
-      // Получаем метаданные для AI feedback
-      const subject = await Subject.findById(test.subjectId);
-      if (!subject) {
-        res.status(404).json({
-          success: false,
-          message: 'Subject not found'
-        });
-        return;
-      }
-
-      const book = subject.books.find((item) => item._id?.toString() === test.bookId.toString());
-      const chapter = test.chapterId 
-        ? book?.chapters.find((item) => item._id?.toString() === test.chapterId!.toString())
-        : undefined;
-
-      // Генерируем AI feedback
-      const correctAnswersData = test.questions.map(q => ({
-        question: q.questionText,
-        correctOption: q.correctOption,
-        explanation: q.aiExplanation
+  /** Создать или найти кэш теста */
+  private async findOrCreateTest(dto: IGenerateTestDTO, generatedTest: any) {
+    if (dto.chapterId) {
+      generatedTest.questions = generatedTest.questions.map((q: any) => ({
+        ...q,
+        relatedContent: { ...q.relatedContent, chapterId: dto.chapterId as any }
       }));
-
-      const aiFeedback = await aiService.analyzeAnswers(
-        correctAnswersData,
-        userAnswers,
-        {
-          subjectTitle: subject.title,
-          bookTitle: book?.title || '',
-          chapterTitle: chapter?.title,
-          topics: []
-        }
-      );
-
-      // Получаем хеши вопросов для истории
-      const questionHashes = test.questions.map(q =>
-        Buffer.from(q.questionText).toString('base64')
-      );
-
-      // Сохраняем в историю пользователя
-      const testHistory: ITestHistory = {
-        subjectId: test.subjectId,
-        bookId: test.bookId,
-        chapterId: test.chapterId,
-        generatedQuestionsHash: questionHashes,
-        answers: userAnswers,
-        result: {
-          totalQuestions,
-          correctAnswers: correctCount,
-          scorePercent
-        },
-        aiFeedback
-      };
-
-      await User.findByIdAndUpdate(
-        userId,
-        { $push: { testHistory } },
-        { new: true }
-      );
-
-      // Возвращаем полные результаты с правильными ответами
-      const detailedResults = {
-        testId: test._id,
-        result: {
-          totalQuestions,
-          correctAnswers: correctCount,
-          scorePercent
-        },
-        aiFeedback,
-        detailedAnswers: test.questions.map((q, index) => ({
-          questionText: q.questionText,
-          options: q.options,
-          correctOption: q.correctOption,
-          selectedOption: userAnswers[index].selectedOption,
-          isCorrect: userAnswers[index].isCorrect,
-          explanation: q.aiExplanation,
-          relatedContent: q.relatedContent
-        }))
-      };
-
-      res.status(200).json({
-        success: true,
-        message: 'Test submitted successfully',
-        data: detailedResults
-      });
-    } catch (error: any) {
-      console.error('Error submitting test:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to submit test',
-        error: error.message
-      });
     }
+
+    const useCache = !process.env.OPENAI_API_KEY;
+    if (useCache) {
+      const cached = await Test.findOne({
+        subjectId: dto.subjectId,
+        bookId: dto.bookId,
+        chapterId: dto.chapterId || { $exists: false },
+        sourceContentHash: generatedTest.sourceContentHash
+      }).sort({ createdAt: -1 });
+      if (cached) return cached;
+    }
+
+    return Test.create({
+      subjectId: dto.subjectId,
+      bookId: dto.bookId,
+      chapterId: dto.chapterId || undefined,
+      questions: generatedTest.questions,
+      sourceContentHash: generatedTest.sourceContentHash
+    });
   }
 
-  /**
-   * Получить тест по ID
-   * GET /tests/:id
-   * 
-   * Возвращает тест БЕЗ правильных ответов
-   * (используется если пользователь хочет повторно пройти тест)
-   */
-  async getTestById(req: Request, res: Response): Promise<void> {
-    try {
-      const { id } = req.params;
+  /** Сформировать тест для клиента (без правильных ответов) */
+  private sanitize(test: any) {
+    return {
+      _id: test._id,
+      subjectId: test.subjectId,
+      bookId: test.bookId,
+      chapterId: test.chapterId,
+      questions: test.questions.map((q: any) => ({
+        questionText: q.questionText,
+        options: q.options
+      })),
+      createdAt: test.createdAt
+    };
+  }
 
-      const test = await Test.findById(id);
-      if (!test) {
-        res.status(404).json({
-          success: false,
-          message: 'Test not found'
-        });
-        return;
-      }
-
-      // Возвращаем тест БЕЗ правильных ответов
-      const testForUser = {
-        _id: test._id,
-        subjectId: test.subjectId,
-        bookId: test.bookId,
-        chapterId: test.chapterId,
-        questions: test.questions.map(q => ({
-          questionText: q.questionText,
-          options: q.options
-        })),
-        createdAt: test.createdAt
-      };
-
-      res.status(200).json({
-        success: true,
-        data: testForUser
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to fetch test',
-        error: error.message
-      });
+  /** Проверить ответы, вернуть userAnswers и счёт */
+  private checkAnswers(test: any, answers: ISubmitTestDTO['answers']) {
+    if (answers.length !== test.questions.length) {
+      throw AppError.badRequest(`Expected ${test.questions.length} answers, received ${answers.length}`);
     }
+
+    const userAnswers: IUserAnswer[] = [];
+    let correctCount = 0;
+
+    for (const question of test.questions) {
+      const ua = answers.find((a) => a.questionText === question.questionText);
+      if (!ua) throw AppError.badRequest(`Missing answer for question: "${question.questionText}"`);
+
+      const isCorrect = ua.selectedOption === question.correctOption;
+      if (isCorrect) correctCount++;
+      userAnswers.push({ question: question.questionText, selectedOption: ua.selectedOption, isCorrect });
+    }
+
+    const totalQuestions = test.questions.length;
+    return {
+      userAnswers,
+      result: { totalQuestions, correctAnswers: correctCount, scorePercent: Math.round((correctCount / totalQuestions) * 100) }
+    };
+  }
+
+  /** Построить детальный результат с AI-feedback */
+  private async buildDetailedResult(test: any, userAnswers: IUserAnswer[], resultSummary: any) {
+    const subject = await Subject.findById(test.subjectId);
+    if (!subject) throw AppError.notFound('Subject not found');
+
+    const book = subject.books.find((b) => b._id?.toString() === test.bookId.toString());
+    const chapter = test.chapterId
+      ? book?.chapters.find((c) => c._id?.toString() === test.chapterId!.toString())
+      : undefined;
+
+    const correctAnswersData = test.questions.map((q: any) => ({
+      question: q.questionText,
+      correctOption: q.correctOption,
+      explanation: q.aiExplanation
+    }));
+
+    const aiFeedback = await aiService.analyzeAnswers(correctAnswersData, userAnswers, {
+      subjectTitle: subject.title,
+      bookTitle: book?.title || '',
+      chapterTitle: chapter?.title,
+      topics: []
+    });
+
+    return {
+      testId: test._id,
+      result: resultSummary,
+      aiFeedback,
+      detailedAnswers: test.questions.map((q: any, i: number) => ({
+        questionText: q.questionText,
+        options: q.options,
+        correctOption: q.correctOption,
+        selectedOption: userAnswers[i].selectedOption,
+        isCorrect: userAnswers[i].isCorrect,
+        explanation: q.aiExplanation,
+        relatedContent: q.relatedContent
+      }))
+    };
+  }
+
+  // ==================== PUBLIC ENDPOINTS ====================
+
+  /** POST /tests/generate-guest */
+  async generateTestGuest(req: Request, res: Response): Promise<void> {
+    const dto: IGenerateTestDTO = req.body;
+    const { contentForAI } = await this.resolveContent(dto);
+    const generated = await aiService.generateTest(contentForAI, []);
+    const test = await this.findOrCreateTest(dto, generated);
+    success(res, this.sanitize(test), 'Test generated successfully', 201);
+  }
+
+  /** POST /tests/submit-guest */
+  async submitTestGuest(req: Request, res: Response): Promise<void> {
+    const { testId, answers }: ISubmitTestDTO = req.body;
+    const test = await Test.findById(testId);
+    if (!test) throw AppError.notFound('Test not found');
+
+    const { userAnswers, result: resultSummary } = this.checkAnswers(test, answers);
+    const detailed = await this.buildDetailedResult(test, userAnswers, resultSummary);
+    success(res, detailed, 'Test submitted successfully');
+  }
+
+  /** POST /tests/generate (auth) */
+  async generateTest(req: Request, res: Response): Promise<void> {
+    const dto: IGenerateTestDTO = req.body;
+    const userId = req.user!.userId;
+    const { contentForAI } = await this.resolveContent(dto);
+
+    const user = await User.findById(userId);
+    const previousQuestions = user?.getAllQuestionHashes(dto.subjectId, dto.bookId) || [];
+
+    const generated = await aiService.generateTest(contentForAI, previousQuestions);
+    const test = await this.findOrCreateTest(dto, generated);
+    success(res, this.sanitize(test), 'Test generated successfully', 201);
+  }
+
+  /** POST /tests/submit (auth) */
+  async submitTest(req: Request, res: Response): Promise<void> {
+    const { testId, answers }: ISubmitTestDTO = req.body;
+    const userId = req.user!.userId;
+
+    const test = await Test.findById(testId);
+    if (!test) throw AppError.notFound('Test not found');
+
+    const { userAnswers, result: resultSummary } = this.checkAnswers(test, answers);
+    const detailed = await this.buildDetailedResult(test, userAnswers, resultSummary);
+
+    const questionHashes = test.questions.map((q) => Buffer.from(q.questionText).toString('base64'));
+    const testHistory: ITestHistory = {
+      subjectId: test.subjectId,
+      bookId: test.bookId,
+      chapterId: test.chapterId,
+      generatedQuestionsHash: questionHashes,
+      answers: userAnswers,
+      result: resultSummary,
+      aiFeedback: detailed.aiFeedback
+    };
+
+    await User.findByIdAndUpdate(userId, { $push: { testHistory } }, { new: true });
+    success(res, detailed, 'Test submitted successfully');
+  }
+
+  /** POST /tests/claim-guest — привязать гостевой тест к авторизованному пользователю */
+  async claimGuestTest(req: Request, res: Response): Promise<void> {
+    const { testId, answers }: ISubmitTestDTO = req.body;
+    const userId = req.user!.userId;
+
+    const test = await Test.findById(testId);
+    if (!test) throw AppError.notFound('Test not found');
+
+    const user = await User.findById(userId);
+    if (!user) throw AppError.notFound('User not found');
+
+    const alreadyClaimed = user.testHistory.some(
+      (h) => h.generatedQuestionsHash?.join(',') === test.questions.map((q) => Buffer.from(q.questionText).toString('base64')).join(',')
+    );
+    if (alreadyClaimed) {
+      success(res, { alreadyClaimed: true }, 'Test already in history');
+      return;
+    }
+
+    const { userAnswers, result: resultSummary } = this.checkAnswers(test, answers);
+    const detailed = await this.buildDetailedResult(test, userAnswers, resultSummary);
+
+    const questionHashes = test.questions.map((q) => Buffer.from(q.questionText).toString('base64'));
+    const testHistory: ITestHistory = {
+      subjectId: test.subjectId,
+      bookId: test.bookId,
+      chapterId: test.chapterId,
+      generatedQuestionsHash: questionHashes,
+      answers: userAnswers,
+      result: resultSummary,
+      aiFeedback: detailed.aiFeedback
+    };
+
+    await User.findByIdAndUpdate(userId, { $push: { testHistory } });
+    success(res, detailed, 'Guest test claimed successfully');
+  }
+
+  /** GET /tests/:id */
+  async getTestById(req: Request, res: Response): Promise<void> {
+    const test = await Test.findById(req.params.id);
+    if (!test) throw AppError.notFound('Test not found');
+    success(res, this.sanitize(test));
   }
 }
 

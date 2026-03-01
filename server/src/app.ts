@@ -1,8 +1,11 @@
 import express, { Application } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import swaggerUi from 'swagger-ui-express';
 import routes from './routes';
 import { errorHandler, notFound } from './middlewares';
+import { API_BASE_PATH } from './config/constants';
+import swaggerSpec from './config/swagger';
 
 /**
  * EXPRESS APPLICATION SETUP
@@ -71,12 +74,16 @@ app.get('/', (_req, res) => {
     success: true,
     message: 'Educational AI Test Platform API',
     version: '1.0.0',
-    documentation: '/api/v1/health'
+    documentation: `${API_BASE_PATH}/health`,
+    apiDocs: '/api-docs'
   });
 });
 
+// Swagger UI
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
 // API routes
-app.use('/api/v1', routes);
+app.use(API_BASE_PATH, routes);
 
 // ==================== ERROR HANDLING ====================
 
