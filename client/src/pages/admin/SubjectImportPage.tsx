@@ -126,7 +126,7 @@ export const SubjectImportPage: React.FC = () => {
           <Button
             className="mt-4"
             onClick={handleImport}
-            loading={loading}
+            isLoading={loading}
             disabled={loading}
           >
             Импортировать предмет

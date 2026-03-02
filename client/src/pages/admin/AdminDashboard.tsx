@@ -114,7 +114,7 @@ export const AdminDashboard: React.FC = () => {
           <Button
             variant="outline"
             onClick={() => fileRef.current?.click()}
-            loading={importLoading}
+            isLoading={importLoading}
             disabled={importLoading}
           >
             📥 Импорт JSON
@@ -138,7 +138,7 @@ export const AdminDashboard: React.FC = () => {
             <Button
               variant="outline"
               onClick={() => fileRef.current?.click()}
-              loading={importLoading}
+              isLoading={importLoading}
             >
               📥 Импорт JSON
             </Button>
