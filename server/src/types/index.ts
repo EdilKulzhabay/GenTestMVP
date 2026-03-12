@@ -106,9 +106,11 @@ export interface ITestHistory {
 export interface IUser {
   _id?: Types.ObjectId;
   fullName: string;
-  userName: string;
+  userName?: string;
   email?: string;
-  password: string;
+  phone?: string;
+  password?: string;
+  googleId?: string;
   role: UserRole;
   testHistory: ITestHistory[];
   createdAt?: Date;
@@ -147,13 +149,14 @@ export interface ITest {
 // Auth DTOs
 export interface IRegisterDTO {
   fullName: string;
+  phone: string;
   email: string;
   userName: string;
   password: string;
 }
 
-export interface IVerifyEmailDTO {
-  email: string;
+export interface IVerifyPhoneDTO {
+  phone: string;
   code: string;
 }
 
@@ -167,7 +170,8 @@ export interface IAuthResponse {
   user: {
     id: string;
     fullName: string;
-    userName: string;
+    userName?: string;
+    email?: string;
     role: UserRole;
   };
 }

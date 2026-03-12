@@ -185,7 +185,7 @@ class TestController {
   /** POST /tests/generate (auth) */
   async generateTest(req: Request, res: Response): Promise<void> {
     const dto: IGenerateTestDTO = req.body;
-    const userId = req.user!.userId;
+    const userId = (req as any).user?.userId;
     const { contentForAI } = await this.resolveContent(dto);
 
     const user = await User.findById(userId);
@@ -199,7 +199,7 @@ class TestController {
   /** POST /tests/submit (auth) */
   async submitTest(req: Request, res: Response): Promise<void> {
     const { testId, answers }: ISubmitTestDTO = req.body;
-    const userId = req.user!.userId;
+    const userId = (req as any).user?.userId;
 
     const test = await Test.findById(testId);
     if (!test) throw AppError.notFound('Test not found');
@@ -225,7 +225,7 @@ class TestController {
   /** POST /tests/claim-guest — привязать гостевой тест к авторизованному пользователю */
   async claimGuestTest(req: Request, res: Response): Promise<void> {
     const { testId, answers }: ISubmitTestDTO = req.body;
-    const userId = req.user!.userId;
+    const userId = (req as any).user?.userId;
 
     const test = await Test.findById(testId);
     if (!test) throw AppError.notFound('Test not found');

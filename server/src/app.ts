@@ -1,8 +1,10 @@
 import express, { Application } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import passport from 'passport';
 import swaggerUi from 'swagger-ui-express';
 import routes from './routes';
+import './config/passport';
 import { errorHandler, notFound } from './middlewares';
 import { API_BASE_PATH } from './config/constants';
 import swaggerSpec from './config/swagger';
@@ -34,6 +36,7 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
+app.use(passport.initialize());
 
 // Request logging (в development режиме)
 if (process.env.NODE_ENV === 'development') {

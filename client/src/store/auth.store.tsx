@@ -5,7 +5,7 @@ import { testApi } from '../api/test.api';
 import {
   LoginRequest,
   RegisterRequest,
-  VerifyEmailRequest,
+  VerifyPhoneRequest,
   User
 } from '../types/auth.types';
 import { getGuestTestSubmission, clearGuestTestSubmission } from '../utils/session';
@@ -33,13 +33,18 @@ export const authStore = {
   }
 };
 
+interface RegisterResult {
+  channel?: string;
+  botLink?: string;
+}
+
 interface AuthContextValue {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (payload: LoginRequest) => Promise<User>;
-  register: (payload: RegisterRequest) => Promise<void>;
-  verifyEmail: (payload: VerifyEmailRequest) => Promise<User>;
+  register: (payload: RegisterRequest) => Promise<RegisterResult>;
+  verifyPhone: (payload: VerifyPhoneRequest) => Promise<User>;
   logout: () => void;
   refresh: () => Promise<void>;
 }
@@ -86,11 +91,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const register = useCallback(async (payload: RegisterRequest) => {
-    await authApi.register(payload);
+    return authApi.register(payload);
   }, []);
 
-  const verifyEmail = useCallback(async (payload: VerifyEmailRequest) => {
-    const user = await authApi.verifyEmail(payload);
+  const verifyPhone = useCallback(async (payload: VerifyPhoneRequest) => {
+    const user = await authApi.verifyPhone(payload);
     authStore.setUser(user);
     void claimPendingGuestTest();
     return user;
@@ -107,11 +112,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isLoading,
       login,
       register,
-      verifyEmail,
+      verifyPhone,
       logout,
       refresh
     }),
-    [storeState.user, isLoading, login, register, verifyEmail, logout, refresh]
+    [storeState.user, isLoading, login, register, verifyPhone, logout, refresh]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

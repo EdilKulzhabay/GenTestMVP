@@ -130,13 +130,13 @@ const UserSchema = new Schema<IUserDocument>({
   },
   userName: { 
     type: String, 
-    required: true,
-    unique: true,
     trim: true,
     lowercase: true,
     minlength: 3,
     maxlength: 50,
-    match: /^[a-zA-Z0-9_]+$/
+    match: /^[a-zA-Z0-9_]+$/,
+    sparse: true,
+    unique: true
   },
   email: {
     type: String,
@@ -145,11 +145,21 @@ const UserSchema = new Schema<IUserDocument>({
     sparse: true,
     unique: true
   },
+  phone: {
+    type: String,
+    trim: true,
+    sparse: true,
+    unique: true
+  },
+  googleId: {
+    type: String,
+    sparse: true,
+    unique: true
+  },
   password: { 
     type: String, 
-    required: true,
     minlength: 6,
-    select: false // Не возвращается по умолчанию в запросах
+    select: false
   },
   role: { 
     type: String, 
@@ -166,6 +176,8 @@ const UserSchema = new Schema<IUserDocument>({
 // ==================== INDEXES ====================
 UserSchema.index({ role: 1 });
 UserSchema.index({ createdAt: -1 });
+UserSchema.index({ googleId: 1 });
+UserSchema.index({ phone: 1 });
 
 // ==================== MIDDLEWARE ====================
 
@@ -174,7 +186,7 @@ UserSchema.index({ createdAt: -1 });
  * Выполняется только если пароль был изменен
  */
 UserSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) {
+  if (!this.isModified('password') || !this.password) {
     return next();
   }
 
@@ -195,6 +207,7 @@ UserSchema.pre('save', async function(next) {
  * @returns true если пароль совпадает
  */
 UserSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
+  if (!this.password) return false;
   try {
     return await bcrypt.compare(candidatePassword, this.password);
   } catch (error) {

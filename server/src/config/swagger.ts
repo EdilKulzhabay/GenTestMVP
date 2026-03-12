@@ -40,19 +40,20 @@ const swaggerSpec = {
 
       RegisterRequest: {
         type: 'object',
-        required: ['fullName', 'email', 'userName', 'password'],
+        required: ['fullName', 'email', 'phone', 'userName', 'password'],
         properties: {
           fullName: { type: 'string', example: 'Иван Иванов', minLength: 2, maxLength: 100 },
           email: { type: 'string', format: 'email', example: 'ivan@example.com' },
+          phone: { type: 'string', example: '+79001234567', minLength: 10 },
           userName: { type: 'string', example: 'ivan_i', minLength: 3, maxLength: 50, pattern: '^[a-zA-Z0-9_]+$' },
           password: { type: 'string', minLength: 6, example: 'secret123' }
         }
       },
-      VerifyEmailRequest: {
+      VerifyPhoneRequest: {
         type: 'object',
-        required: ['email', 'code'],
+        required: ['phone', 'code'],
         properties: {
-          email: { type: 'string', format: 'email' },
+          phone: { type: 'string', example: '+79001234567' },
           code: { type: 'string', minLength: 6, maxLength: 6, example: '123456' }
         }
       },
@@ -406,7 +407,7 @@ const swaggerSpec = {
     '/auth/register': {
       post: {
         tags: ['Auth'],
-        summary: 'Шаг 1 — регистрация, отправка кода на email',
+        summary: 'Шаг 1 — регистрация, отправка кода на телефон (WhatsApp → Telegram)',
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RegisterRequest' } } } },
         responses: {
           200: { description: 'Код отправлен на email', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, message: { type: 'string', example: 'Verification code sent to your email' } } } } } },
@@ -414,11 +415,11 @@ const swaggerSpec = {
         }
       }
     },
-    '/auth/verify-email': {
+    '/auth/verify-phone': {
       post: {
         tags: ['Auth'],
         summary: 'Шаг 2 — подтверждение кода и создание аккаунта',
-        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/VerifyEmailRequest' } } } },
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/VerifyPhoneRequest' } } } },
         responses: {
           201: { description: 'Аккаунт создан, cookie установлен', content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthResponse' } } } },
           400: { description: 'Неверный или просроченный код', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -435,6 +436,20 @@ const swaggerSpec = {
           201: { description: 'Админ создан, cookie установлен', content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthResponse' } } } },
           400: { description: 'Username уже занят', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }
         }
+      }
+    },
+    '/auth/google': {
+      get: {
+        tags: ['Auth'],
+        summary: 'Google OAuth — редирект на Google для входа/регистрации',
+        responses: { 302: { description: 'Редирект на Google' }, 501: { description: 'Google OAuth не настроен' } }
+      }
+    },
+    '/auth/google/callback': {
+      get: {
+        tags: ['Auth'],
+        summary: 'Callback после Google OAuth',
+        responses: { 302: { description: 'Редирект на фронтенд с установленной cookie' } }
       }
     },
     '/auth/login': {

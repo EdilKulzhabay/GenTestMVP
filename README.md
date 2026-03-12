@@ -64,6 +64,14 @@ curl -X POST http://localhost:5000/api/v1/subjects/import \
 | `SMTP_USER` | нет | — | SMTP логин |
 | `SMTP_PASS` | нет | — | SMTP пароль |
 | `SMTP_FROM` | нет | — | Адрес отправителя |
+| `GOOGLE_CLIENT_ID` | нет | — | Google OAuth Client ID |
+| `GOOGLE_CLIENT_SECRET` | нет | — | Google OAuth Client Secret |
+| `GOOGLE_CALLBACK_URL` | нет | — | Callback URL для Google (например `https://your-domain.com/api/v1/auth/google/callback`) |
+| `FRONTEND_URL` | нет | — | URL фронтенда для редиректа после Google OAuth |
+| `TWILIO_ACCOUNT_SID` | нет | — | Twilio Account SID (для WhatsApp) |
+| `TWILIO_AUTH_TOKEN` | нет | — | Twilio Auth Token |
+| `TWILIO_WHATSAPP_FROM` | нет | — | WhatsApp-номер Twilio (например `whatsapp:+14155238886`) |
+| `TELEGRAM_BOT_TOKEN` | нет | — | Токен Telegram-бота (fallback, если WhatsApp не сработал) |
 
 ### client/.env
 

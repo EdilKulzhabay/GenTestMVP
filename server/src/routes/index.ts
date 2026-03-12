@@ -3,6 +3,7 @@ import authRoutes from './auth.routes';
 import subjectRoutes from './subject.routes';
 import testRoutes from './test.routes';
 import userRoutes from './user.routes';
+import telegramRoutes from './telegram.routes';
 import { ROUTES } from '../config/constants';
 import { success } from '../utils';
 
@@ -13,6 +14,7 @@ import { success } from '../utils';
 
 const router = Router();
 
+router.use('/webhooks', telegramRoutes);
 router.use(ROUTES.AUTH, authRoutes);
 router.use(ROUTES.SUBJECTS, subjectRoutes);
 router.use(ROUTES.TESTS, testRoutes);

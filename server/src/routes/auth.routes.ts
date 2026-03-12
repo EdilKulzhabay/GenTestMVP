@@ -1,19 +1,13 @@
 import { Router } from 'express';
+import passport from 'passport';
 import { body } from 'express-validator';
 import { authController } from '../controllers';
 import { authenticate, asyncHandler, validate } from '../middlewares';
 
-/**
- * AUTH ROUTES
- * Маршруты для аутентификации
- */
-
 const router = Router();
 
 /**
- * @route   POST /auth/register
- * @desc    Регистрация нового пользователя
- * @access  Public
+ * POST /auth/register — шаг 1: отправка кода на телефон (WhatsApp → Telegram)
  */
 router.post(
   '/register',
@@ -26,6 +20,10 @@ router.post(
       .trim()
       .isEmail()
       .withMessage('Valid email is required'),
+    body('phone')
+      .trim()
+      .isLength({ min: 10 })
+      .withMessage('Valid phone number is required'),
     body('userName')
       .trim()
       .isLength({ min: 3, max: 50 })
@@ -40,26 +38,27 @@ router.post(
   asyncHandler(authController.register.bind(authController))
 );
 
+/**
+ * POST /auth/verify-phone — шаг 2: подтверждение кода
+ */
 router.post(
-  '/verify-email',
+  '/verify-phone',
   [
-    body('email')
+    body('phone')
       .trim()
-      .isEmail()
-      .withMessage('Valid email is required'),
+      .isLength({ min: 10 })
+      .withMessage('Phone number is required'),
     body('code')
       .trim()
       .isLength({ min: 6, max: 6 })
       .withMessage('Code must be 6 digits')
   ],
   validate,
-  asyncHandler(authController.verifyEmail.bind(authController))
+  asyncHandler(authController.verifyPhone.bind(authController))
 );
 
 /**
- * @route   POST /auth/create-admin
- * @desc    Создание администратора (без email-верификации)
- * @access  Public (защитить в production через env-секрет)
+ * POST /auth/create-admin
  */
 router.post(
   '/create-admin',
@@ -83,9 +82,7 @@ router.post(
 );
 
 /**
- * @route   POST /auth/login
- * @desc    Вход в систему
- * @access  Public
+ * POST /auth/login
  */
 router.post(
   '/login',
@@ -103,9 +100,41 @@ router.post(
 );
 
 /**
- * @route   GET /auth/me
- * @desc    Получить информацию о текущем пользователе
- * @access  Private
+ * GET /auth/google — Google OAuth (если настроен)
+ */
+router.get(
+  '/google',
+  (req, res, next) => {
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+      res.status(501).json({ success: false, message: 'Google OAuth not configured' });
+      return;
+    }
+    return passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
+  }
+);
+
+/**
+ * GET /auth/google/callback
+ */
+router.get(
+  '/google/callback',
+  (req, res, next) => {
+    passport.authenticate('google', { session: false }, (err: Error, user: any) => {
+      if (err) return next(err);
+      if (!user) {
+        res.redirect(
+          `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=google_auth_failed`
+        );
+        return;
+      }
+      (req as any).user = user;
+      authController.googleCallback(req, res);
+    })(req, res, next);
+  }
+);
+
+/**
+ * GET /auth/me
  */
 router.get(
   '/me',

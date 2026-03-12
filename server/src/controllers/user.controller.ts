@@ -5,7 +5,7 @@ import { success, AppError } from '../utils';
 class UserController {
   /** GET /users/me */
   async getCurrentUser(req: Request, res: Response): Promise<void> {
-    const user = await User.findById(req.user!.userId).select('-password');
+    const user = await User.findById((req as any).user?.userId).select('-password');
     if (!user) throw AppError.notFound('User not found');
     success(res, user);
   }
@@ -14,7 +14,7 @@ class UserController {
   async getTestHistory(req: Request, res: Response): Promise<void> {
     const { subjectId, limit, sortBy = 'createdAt', order = 'desc' } = req.query;
 
-    const user = await User.findById(req.user!.userId)
+    const user = await User.findById((req as any).user?.userId)
       .select('testHistory')
       .populate('testHistory.subjectId', 'title');
     if (!user) throw AppError.notFound('User not found');
@@ -38,7 +38,7 @@ class UserController {
 
   /** GET /users/me/stats */
   async getUserStats(req: Request, res: Response): Promise<void> {
-    const user = await User.findById(req.user!.userId)
+    const user = await User.findById((req as any).user?.userId)
       .select('testHistory')
       .populate('testHistory.subjectId', 'title');
     if (!user) throw AppError.notFound('User not found');
@@ -68,7 +68,7 @@ class UserController {
 
   /** GET /users/me/tests/:testHistoryId */
   async getTestHistoryDetails(req: Request, res: Response): Promise<void> {
-    const user = await User.findById(req.user!.userId)
+    const user = await User.findById((req as any).user?.userId)
       .select('testHistory')
       .populate('testHistory.subjectId', 'title');
     if (!user) throw AppError.notFound('User not found');

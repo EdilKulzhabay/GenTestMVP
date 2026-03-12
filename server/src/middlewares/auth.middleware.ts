@@ -12,17 +12,6 @@ import { User } from '../models';
  * - authorize: проверяет роль пользователя
  */
 
-// Расширяем Request для добавления информации о пользователе
-declare global {
-  namespace Express {
-    interface Request {
-      user?: {
-        userId: string;
-        role: UserRole;
-      };
-    }
-  }
-}
 
 /**
  * Middleware для аутентификации пользователя
@@ -116,7 +105,7 @@ export const authorize = (...roles: UserRole[]) => {
       return;
     }
 
-    if (!roles.includes(req.user.role)) {
+    if (!roles.includes((req as any).user.role)) {
       res.status(403).json({
         success: false,
         message: `Access denied. Required roles: ${roles.join(', ')}`
