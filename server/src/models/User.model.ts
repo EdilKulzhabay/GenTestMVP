@@ -174,10 +174,9 @@ const UserSchema = new Schema<IUserDocument>({
 });
 
 // ==================== INDEXES ====================
+// googleId и phone уже имеют unique: true в схеме — не дублируем
 UserSchema.index({ role: 1 });
 UserSchema.index({ createdAt: -1 });
-UserSchema.index({ googleId: 1 });
-UserSchema.index({ phone: 1 });
 
 // ==================== MIDDLEWARE ====================
 

@@ -20,8 +20,7 @@ const TelegramPhoneLinkSchema = new Schema<ITelegramPhoneLinkDocument>(
   },
   { timestamps: true, collection: 'telegram_phone_links' }
 );
-
-TelegramPhoneLinkSchema.index({ phone: 1 });
+// phone уже имеет unique: true — индекс создаётся автоматически
 
 export const TelegramPhoneLink: Model<ITelegramPhoneLinkDocument> = mongoose.model<
   ITelegramPhoneLinkDocument

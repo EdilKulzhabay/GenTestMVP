@@ -31,7 +31,6 @@ const PendingRegistrationSchema = new Schema<IPendingRegistrationDocument>(
 
 PendingRegistrationSchema.index({ phone: 1 });
 PendingRegistrationSchema.index({ email: 1 });
-PendingRegistrationSchema.index({ telegramToken: 1 });
 
 export const PendingRegistration: Model<IPendingRegistrationDocument> = mongoose.model<
   IPendingRegistrationDocument

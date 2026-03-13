@@ -64,14 +64,29 @@ function initClient(): Promise<void> {
       puppeteer: puppeteerOpts
     });
 
-    client.on('qr', (qr: string) => {
+    client.on('qr', async (qr: string) => {
       console.log('[WhatsApp] Отсканируйте QR-код в приложении WhatsApp:');
       console.log('[WhatsApp] Настройки → Связанные устройства → Привязать устройство');
       try {
         const qrcode = require('qrcode-terminal');
         qrcode.generate(qr, { small: true });
       } catch {
-        console.log('[WhatsApp] Установите qrcode-terminal для отображения QR в консоли');
+        // qrcode-terminal может не работать в pm2/headless
+      }
+      try {
+        const qrcodePkg = await import('qrcode');
+        const dataUrl = await qrcodePkg.toDataURL(qr);
+        const qrPath = path.join(process.cwd(), '.wwebjs_auth', 'qr.png');
+        const fsAsync = await import('fs/promises');
+        await fsAsync.mkdir(path.dirname(qrPath), { recursive: true });
+        const base64 = dataUrl.split(',')[1];
+        if (base64) {
+          await fsAsync.writeFile(qrPath, Buffer.from(base64, 'base64'));
+          console.log('[WhatsApp] QR-код сохранён в:', qrPath);
+          console.log('[WhatsApp] Скопируйте файл на локальный ПК и отсканируйте в WhatsApp');
+        }
+      } catch {
+        // qrcode опционален
       }
     });
 
@@ -146,9 +161,8 @@ export async function startWhatsAppClient(): Promise<void> {
     console.log('[WhatsApp] Отключён (WHATSAPP_ENABLED=false)');
     return;
   }
-  try {
-    // await initClient();
-  } catch (err) {
-    console.warn('[WhatsApp] Предзагрузка не удалась, клиент инициализируется при первой отправке:', err);
-  }
+  // Запускаем в фоне — не блокируем старт сервера (QR может потребовать сканирования)
+  initClient().catch((err) => {
+    console.warn('[WhatsApp] Предзагрузка не удалась:', err?.message || err);
+  });
 }
