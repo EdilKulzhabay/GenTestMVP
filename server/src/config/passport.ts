@@ -1,5 +1,5 @@
 import passport from 'passport';
-import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
+import { Strategy as GoogleStrategy, type Profile } from 'passport-google-oauth20';
 import { User } from '../models';
 import { UserRole } from '../types';
 
@@ -9,14 +9,14 @@ const GOOGLE_CALLBACK_URL = process.env.GOOGLE_CALLBACK_URL || 'http://localhost
 
 if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
   passport.use(
-    new GoogleStrategy(
+    new (GoogleStrategy as any)(
       {
         clientID: GOOGLE_CLIENT_ID,
         clientSecret: GOOGLE_CLIENT_SECRET,
         callbackURL: GOOGLE_CALLBACK_URL,
         scope: ['profile', 'email']
       },
-      async (_accessToken, _refreshToken, profile, done) => {
+      async (_accessToken: string, _refreshToken: string, profile: Profile, done: (err: Error | null, user?: unknown) => void) => {
         try {
           const email = profile.emails?.[0]?.value?.toLowerCase();
           const googleId = profile.id;
@@ -53,15 +53,15 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
   );
 }
 
-passport.serializeUser((user: any, done) => {
-  done(null, user._id);
+passport.serializeUser((user: unknown, done: (err: Error | null, id?: unknown) => void) => {
+  done(null, (user as { _id: unknown })._id);
 });
 
 passport.deserializeUser(async (id: string, done) => {
   try {
     const user = await User.findById(id);
-    done(null, user);
+    done(null, user ?? null);
   } catch (err) {
-    done(err, null);
+    done(err instanceof Error ? err : new Error(String(err)), null);
   }
 });

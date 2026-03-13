@@ -8,6 +8,7 @@ import './config/passport';
 import { errorHandler, notFound } from './middlewares';
 import { API_BASE_PATH } from './config/constants';
 import swaggerSpec from './config/swagger';
+import { success } from './utils';
 
 /**
  * EXPRESS APPLICATION SETUP
@@ -61,6 +62,25 @@ app.get('/', (_req, res) => {
 
 // Swagger UI
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+// Отладка: GET /api/v1/debug — показывает, что запрос доходит до сервера
+app.get(`${API_BASE_PATH}/debug`, (req, res) => {
+  success(res, {
+    path: req.path,
+    originalUrl: req.originalUrl,
+    baseUrl: req.baseUrl,
+    method: req.method
+  }, 'API reachable');
+});
+
+// Google OAuth — прямой маршрут (на случай проблем с вложенным роутером)
+app.get(`${API_BASE_PATH}/auth/google`, (req, res, next) => {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    res.status(501).json({ success: false, message: 'Google OAuth not configured' });
+    return;
+  }
+  return passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
+});
 
 // API routes
 app.use(API_BASE_PATH, routes);

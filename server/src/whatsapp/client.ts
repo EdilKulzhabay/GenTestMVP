@@ -64,7 +64,7 @@ function initClient(): Promise<void> {
       puppeteer: puppeteerOpts
     });
 
-    client.on('qr', (qr) => {
+    client.on('qr', (qr: string) => {
       console.log('[WhatsApp] Отсканируйте QR-код в приложении WhatsApp:');
       console.log('[WhatsApp] Настройки → Связанные устройства → Привязать устройство');
       try {
@@ -85,12 +85,12 @@ function initClient(): Promise<void> {
       console.log('[WhatsApp] Сессия аутентифицирована');
     });
 
-    client.on('auth_failure', (msg) => {
+    client.on('auth_failure', (msg: string) => {
       console.error('[WhatsApp] Ошибка аутентификации:', msg);
       reject(new Error(msg));
     });
 
-    client.on('disconnected', (reason) => {
+    client.on('disconnected', (reason: string) => {
       isReady = false;
       console.warn('[WhatsApp] Отключено:', reason);
     });
