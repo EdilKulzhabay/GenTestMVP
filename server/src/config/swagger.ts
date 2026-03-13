@@ -5,21 +5,27 @@ const swaggerSpec = {
   info: {
     title: 'GenTest MVP API',
     version: '1.0.0',
-    description: 'API платформы для AI-генерации тестов по учебному контенту. Предметы содержат вложенную структуру: Subject → Book → Chapter → Topic → Paragraph.'
+    description: `API платформы для AI-генерации тестов по учебному контенту. Предметы содержат вложенную структуру: Subject → Book → Chapter → Topic → Paragraph.
+
+**Базовый путь:** все эндпоинты имеют префикс \`${API_BASE_PATH}\` (например: \`${API_BASE_PATH}/auth/login\`).`
   },
   servers: [
-    { url: `http://localhost:5000${API_BASE_PATH}`, description: 'Development' }
+    { url: `http://localhost:5111${API_BASE_PATH}`, description: 'Development (port 5111)' },
+    { url: `http://localhost:5000${API_BASE_PATH}`, description: 'Development (port 5000)' },
+    { url: `https://kakoi-to-do-men.ru${API_BASE_PATH}`, description: 'Production' }
   ],
   tags: [
-    { name: 'Auth', description: 'Регистрация, аутентификация и создание админа' },
+    { name: 'Auth', description: 'Регистрация (WhatsApp/Telegram OTP), вход, Google OAuth' },
     { name: 'Subjects', description: 'Управление учебным контентом (предметы, книги, главы, темы, параграфы)' },
     { name: 'Tests', description: 'Генерация и сдача тестов (auth + guest)' },
     { name: 'Users', description: 'Профиль, история тестов, статистика' },
+    { name: 'Webhooks', description: 'Внешние webhook (Telegram-бот)' },
     { name: 'System', description: 'Служебные эндпоинты' }
   ],
   components: {
     securitySchemes: {
-      cookieAuth: { type: 'apiKey', in: 'cookie', name: 'token', description: 'JWT-токен в HTTP-only cookie' }
+      cookieAuth: { type: 'apiKey', in: 'cookie', name: 'token', description: 'JWT в HTTP-only cookie' },
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', description: 'JWT в заголовке Authorization: Bearer <token>' }
     },
     schemas: {
       Error: {
@@ -89,9 +95,25 @@ const swaggerSpec = {
                   id: { type: 'string' },
                   fullName: { type: 'string' },
                   userName: { type: 'string' },
+                  email: { type: 'string' },
                   role: { type: 'string', enum: ['admin', 'user'] }
                 }
               }
+            }
+          }
+        }
+      },
+      RegisterResponse: {
+        type: 'object',
+        description: 'Ответ после отправки кода. При недоступности WhatsApp/Telegram возвращается botLink.',
+        properties: {
+          success: { type: 'boolean', example: true },
+          message: { type: 'string', example: 'Verification code sent via WhatsApp' },
+          data: {
+            type: 'object',
+            properties: {
+              channel: { type: 'string', enum: ['whatsapp', 'telegram'], description: 'Канал отправки кода' },
+              botLink: { type: 'string', description: 'Ссылка на Telegram-бота для получения кода (если WhatsApp/Telegram недоступны)' }
             }
           }
         }
@@ -407,11 +429,12 @@ const swaggerSpec = {
     '/auth/register': {
       post: {
         tags: ['Auth'],
-        summary: 'Шаг 1 — регистрация, отправка кода на телефон (WhatsApp → Telegram)',
+        summary: 'Шаг 1 — регистрация, отправка OTP на телефон',
+        description: 'Отправляет 6-значный код: сначала WhatsApp, при неудаче — Telegram. Если оба недоступны — возвращает botLink (ссылка на Telegram-бота с номером).',
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RegisterRequest' } } } },
         responses: {
-          200: { description: 'Код отправлен на email', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, message: { type: 'string', example: 'Verification code sent to your email' } } } } } },
-          400: { description: 'Username/email уже заняты', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }
+          200: { description: 'Код отправлен (WhatsApp/Telegram) или возвращена ссылка на бота', content: { 'application/json': { schema: { $ref: '#/components/schemas/RegisterResponse' } } } },
+          400: { description: 'Username/email/phone уже заняты', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }
         }
       }
     },
@@ -466,8 +489,9 @@ const swaggerSpec = {
     '/auth/me': {
       get: {
         tags: ['Auth'],
-        summary: 'Текущий пользователь по cookie',
-        security: [{ cookieAuth: [] }],
+        summary: 'Текущий пользователь',
+        description: 'JWT из cookie или заголовка Authorization: Bearer',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         responses: {
           200: { description: 'Данные пользователя', content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthResponse' } } } },
           401: { description: 'Не авторизован', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -491,7 +515,7 @@ const swaggerSpec = {
       post: {
         tags: ['Subjects'],
         summary: 'Создать пустой предмет (admin)',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { type: 'object', required: ['title'], properties: { title: { type: 'string', maxLength: 200 }, description: { type: 'string', maxLength: 1000 } } } } }
@@ -508,7 +532,7 @@ const swaggerSpec = {
         tags: ['Subjects'],
         summary: 'Импорт предмета целиком (admin)',
         description: 'Создаёт предмет со всей вложенной структурой: книги → главы → темы → параграфы. Принимает JSON-файл (например, subject.json).',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { $ref: '#/components/schemas/ImportSubjectRequest' } } }
@@ -537,7 +561,7 @@ const swaggerSpec = {
       post: {
         tags: ['Subjects'],
         summary: 'Добавить книгу к предмету (admin)',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'ObjectId предмета' }],
         requestBody: {
           required: true,
@@ -553,7 +577,7 @@ const swaggerSpec = {
       post: {
         tags: ['Subjects'],
         summary: 'Добавить главу к книге (admin)',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         parameters: [
           { name: 'bookId', in: 'path', required: true, schema: { type: 'string' }, description: 'ObjectId книги' },
           { name: 'subjectId', in: 'query', required: true, schema: { type: 'string' }, description: 'ObjectId предмета' }
@@ -572,7 +596,7 @@ const swaggerSpec = {
       post: {
         tags: ['Subjects'],
         summary: 'Добавить тему к главе (admin)',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         parameters: [
           { name: 'chapterId', in: 'path', required: true, schema: { type: 'string' }, description: 'ObjectId главы' },
           { name: 'subjectId', in: 'query', required: true, schema: { type: 'string' }, description: 'ObjectId предмета' },
@@ -592,7 +616,7 @@ const swaggerSpec = {
       post: {
         tags: ['Subjects'],
         summary: 'Добавить параграф к теме (admin)',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         parameters: [
           { name: 'topicId', in: 'path', required: true, schema: { type: 'string' }, description: 'ObjectId темы' },
           { name: 'subjectId', in: 'query', required: true, schema: { type: 'string' }, description: 'ObjectId предмета' },
@@ -626,7 +650,7 @@ const swaggerSpec = {
       post: {
         tags: ['Tests'],
         summary: 'Сгенерировать тест (auth)',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/GenerateTestRequest' } } } },
         responses: {
           200: { description: 'Тест сгенерирован', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/GeneratedTest' } } } } } },
@@ -649,7 +673,7 @@ const swaggerSpec = {
       post: {
         tags: ['Tests'],
         summary: 'Отправить ответы (auth, сохраняется в историю)',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/SubmitTestRequest' } } } },
         responses: {
           200: { description: 'Результат теста', content: { 'application/json': { schema: { $ref: '#/components/schemas/SubmitTestResponse' } } } }
@@ -661,7 +685,7 @@ const swaggerSpec = {
         tags: ['Tests'],
         summary: 'Привязать гостевой тест к авторизованному пользователю',
         description: 'Вызывается автоматически после login/register, если у гостя был пройден тест. Проверяет ответы и сохраняет результат в историю пользователя.',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/SubmitTestRequest' } } } },
         responses: {
           200: { description: 'Тест привязан к пользователю', content: { 'application/json': { schema: { $ref: '#/components/schemas/SubmitTestResponse' } } } },
@@ -683,7 +707,7 @@ const swaggerSpec = {
       get: {
         tags: ['Tests'],
         summary: 'Получить тест по ID (без правильных ответов)',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'ObjectId теста' }],
         responses: {
           200: { description: 'Тест', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/GeneratedTest' } } } } } },
@@ -697,7 +721,7 @@ const swaggerSpec = {
       get: {
         tags: ['Users'],
         summary: 'Профиль текущего пользователя',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         responses: {
           200: { description: 'Профиль' },
           401: { description: 'Не авторизован' }
@@ -708,7 +732,7 @@ const swaggerSpec = {
       get: {
         tags: ['Users'],
         summary: 'История тестов',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         parameters: [
           { name: 'subjectId', in: 'query', schema: { type: 'string' }, description: 'Фильтр по предмету' },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1 }, description: 'Количество записей' },
@@ -724,7 +748,7 @@ const swaggerSpec = {
       get: {
         tags: ['Users'],
         summary: 'Статистика пользователя',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         responses: {
           200: { description: 'Статистика (среднее, лучший, худший, прогресс)', content: { 'application/json': { schema: { $ref: '#/components/schemas/UserStats' } } } }
         }
@@ -734,7 +758,7 @@ const swaggerSpec = {
       get: {
         tags: ['Users'],
         summary: 'Детали конкретного теста из истории',
-        security: [{ cookieAuth: [] }],
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         parameters: [{ name: 'testHistoryId', in: 'path', required: true, schema: { type: 'string' }, description: 'ObjectId записи из истории' }],
         responses: {
           200: { description: 'Детальная информация о тесте' },
@@ -743,12 +767,55 @@ const swaggerSpec = {
       }
     },
 
+    // ==================== WEBHOOKS ====================
+    '/webhooks/telegram': {
+      post: {
+        tags: ['Webhooks'],
+        summary: 'Webhook Telegram-бота',
+        description: 'Вызывается Telegram при сообщениях боту. Обрабатывает /start +номер (привязка) и /start НОМЕР (получение кода). Настройка: npm run telegram:webhook -- https://your-domain.com',
+        requestBody: { content: { 'application/json': { schema: { type: 'object', description: 'Telegram Update object' } } } },
+        responses: { 200: { description: 'OK (Telegram требует 200)' } }
+      }
+    },
+
     // ==================== SYSTEM ====================
     '/health': {
       get: {
         tags: ['System'],
         summary: 'Health check',
-        responses: { 200: { description: 'API работает', content: { 'application/json': { schema: { type: 'object', properties: { status: { type: 'string', example: 'ok' } } } } } } }
+        responses: { 200: { description: 'API работает', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { type: 'object', properties: { timestamp: { type: 'string', format: 'date-time' } } } } } } } } }
+      }
+    },
+    '/debug': {
+      get: {
+        tags: ['System'],
+        summary: 'Отладка — проверка доступности API',
+        description: 'Возвращает path, originalUrl, baseUrl, method запроса. Для диагностики прокси/маршрутизации.',
+        responses: {
+          200: {
+            description: 'Данные запроса',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean' },
+                    message: { type: 'string' },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        path: { type: 'string' },
+                        originalUrl: { type: 'string' },
+                        baseUrl: { type: 'string' },
+                        method: { type: 'string' }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

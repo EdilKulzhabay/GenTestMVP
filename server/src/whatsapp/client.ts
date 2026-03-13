@@ -9,11 +9,14 @@ import * as fs from 'fs';
 
 let client: Client | null = null;
 
-/** Пути к Chrome по умолчанию (macOS, Linux, Windows) */
+/** Пути к Chrome/Chromium по умолчанию (macOS, Linux, Windows) */
 const DEFAULT_CHROME_PATHS = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/usr/bin/google-chrome-stable',
+  '/usr/bin/google-chrome',
   '/usr/bin/chromium-browser',
+  '/usr/bin/chromium',
+  '/snap/bin/chromium',
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 ];
 
