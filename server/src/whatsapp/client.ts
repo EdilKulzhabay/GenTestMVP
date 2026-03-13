@@ -141,8 +141,7 @@ export function isClientReady(): boolean {
  * Вызывать опционально — клиент инициализируется при первой отправке.
  */
 export async function startWhatsAppClient(): Promise<void> {
-  // const enabled = process.env.WHATSAPP_ENABLED !== 'false';
-  const enabled = false;
+  const enabled = process.env.WHATSAPP_ENABLED !== 'false';
   if (!enabled) {
     console.log('[WhatsApp] Отключён (WHATSAPP_ENABLED=false)');
     return;
