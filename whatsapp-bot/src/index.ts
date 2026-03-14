@@ -4,6 +4,8 @@
  */
 
 import 'dotenv/config';
+import * as fs from 'fs';
+import * as path from 'path';
 import express, { Request, Response } from 'express';
 import { sendMessage, isClientReady, startClient } from './client';
 
@@ -44,6 +46,53 @@ app.get('/health', (_req: Request, res: Response) => {
   });
 });
 
+/** GET /qr — отдать QR-код для аутентификации (для сервера без TTY) */
+app.get('/qr', (req: Request, res: Response) => {
+  const qrPath = path.join(process.cwd(), '.wwebjs_auth', 'qr.png');
+  if (!fs.existsSync(qrPath)) {
+    res.status(404).json({
+      ok: false,
+      message: 'QR ещё не сгенерирован. Подождите 10–20 сек и обновите страницу.',
+      path: qrPath
+    });
+    return;
+  }
+  res.type('png').sendFile(qrPath);
+});
+
+/** GET /qr-page — HTML-страница с QR и автообновлением */
+app.get('/qr-page', (req: Request, res: Response) => {
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>WhatsApp QR</title>
+<style>body{font-family:sans-serif;max-width:400px;margin:40px auto;text-align:center;padding:20px}
+img{max-width:100%;border:1px solid #ddd;border-radius:8px}
+p{color:#666;font-size:14px}
+.refresh{color:#25D366;font-size:12px}</style></head>
+<body>
+<h2>WhatsApp — аутентификация</h2>
+<p>Откройте WhatsApp на телефоне → Настройки → Связанные устройства → Привязать устройство</p>
+<p>Отсканируйте QR-код в приложении</p>
+<div id="qr"></div>
+<p class="refresh" id="status">Загрузка...</p>
+<script>
+function load(){
+  fetch('/qr').then(r=>{
+    if(r.ok)return r.blob();
+    throw new Error('QR ещё не готов');
+  }).then(blob=>{
+    document.getElementById('qr').innerHTML='<img src="'+URL.createObjectURL(blob)+'" alt="QR">';
+    document.getElementById('status').textContent='QR-код отображается. Отсканируйте в WhatsApp.';
+  }).catch(()=>{
+    document.getElementById('qr').innerHTML='';
+    document.getElementById('status').textContent='QR генерируется... Обновление через 5 сек';
+    setTimeout(load,5000);
+  });
+}
+load();
+</script></body></html>`;
+  res.type('html').send(html);
+});
+
 const enabled = process.env.WHATSAPP_ENABLED !== 'false';
 
 if (!enabled) {
@@ -57,6 +106,7 @@ if (!enabled) {
     console.log(`   Порт: ${PORT}`);
     console.log(`   POST http://localhost:${PORT}/send { phone, text }`);
     console.log(`   GET  http://localhost:${PORT}/health`);
+    console.log(`   GET  http://localhost:${PORT}/qr-page — QR-код для аутентификации (откройте в браузере)`);
     console.log('');
     // Инициализация WhatsApp — QR появится в консоли или в .wwebjs_auth/qr.png
     startClient().catch((err) => {
