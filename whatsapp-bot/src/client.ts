@@ -9,7 +9,6 @@ import * as fs from 'fs';
 
 let client: Client | null = null;
 
-/** Пути к Chrome/Chromium по умолчанию (macOS, Linux, Windows) */
 const DEFAULT_CHROME_PATHS = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/usr/bin/google-chrome-stable',
@@ -25,21 +24,15 @@ function findChromeExecutable(): string | undefined {
   if (envPath && fs.existsSync(envPath)) return envPath;
   return DEFAULT_CHROME_PATHS.find((p) => fs.existsSync(p));
 }
+
 let isReady = false;
 let initPromise: Promise<void> | null = null;
 
-/**
- * Форматирует номер телефона для WhatsApp API.
- * +79001234567 -> 79001234567@c.us
- */
 export function formatPhoneForWhatsApp(phone: string): string {
   const digits = phone.replace(/\D/g, '');
   return `${digits}@c.us`;
 }
 
-/**
- * Инициализирует WhatsApp клиент (один раз).
- */
 function initClient(): Promise<void> {
   if (initPromise) return initPromise;
 
@@ -47,11 +40,7 @@ function initClient(): Promise<void> {
     const dataPath = path.join(process.cwd(), '.wwebjs_auth');
     const chromePath = findChromeExecutable();
     if (!chromePath) {
-      reject(
-        new Error(
-          'Chrome не найден. Установите Google Chrome или выполните: npx puppeteer browsers install chrome'
-        )
-      );
+      reject(new Error('Chrome не найден. Установите Google Chrome или укажите CHROME_PATH'));
       return;
     }
     const puppeteerOpts: Record<string, unknown> = {
@@ -86,7 +75,6 @@ function initClient(): Promise<void> {
         if (base64) {
           await fsAsync.writeFile(qrPath, Buffer.from(base64, 'base64'));
           console.log('[WhatsApp] QR-код сохранён в:', qrPath);
-          console.log('[WhatsApp] Скопируйте файл на локальный ПК и отсканируйте в WhatsApp');
         }
       } catch {
         // qrcode опционален
@@ -119,12 +107,6 @@ function initClient(): Promise<void> {
   return initPromise;
 }
 
-/**
- * Отправляет текстовое сообщение на указанный номер.
- * @param phone Номер в формате +79001234567 или 79001234567
- * @param text Текст сообщения
- * @returns true если отправлено успешно
- */
 export async function sendMessage(phone: string, text: string): Promise<boolean> {
   if (!client || !isReady) {
     try {
@@ -139,7 +121,9 @@ export async function sendMessage(phone: string, text: string): Promise<boolean>
 
   try {
     const chatId = formatPhoneForWhatsApp(phone);
+    console.log('[WhatsApp] Отправка на', chatId);
     await client.sendMessage(chatId, text);
+    console.log('[WhatsApp] Сообщение отправлено');
     return true;
   } catch (err) {
     console.error('[WhatsApp] Ошибка отправки:', err);
@@ -147,25 +131,14 @@ export async function sendMessage(phone: string, text: string): Promise<boolean>
   }
 }
 
-/**
- * Проверяет, готов ли клиент к отправке.
- */
 export function isClientReady(): boolean {
   return isReady && client !== null;
 }
 
 /**
- * Запускает инициализацию клиента при старте сервера.
- * Вызывать опционально — клиент инициализируется при первой отправке.
+ * Запускает инициализацию клиента при старте.
+ * QR-код появится в консоли или в .wwebjs_auth/qr.png
  */
-export async function startWhatsAppClient(): Promise<void> {
-  const enabled = process.env.WHATSAPP_ENABLED !== 'false';
-  if (!enabled) {
-    console.log('[WhatsApp] Отключён (WHATSAPP_ENABLED=false)');
-    return;
-  }
-  // Запускаем в фоне — не блокируем старт сервера (QR может потребовать сканирования)
-  initClient().catch((err) => {
-    console.warn('[WhatsApp] Предзагрузка не удалась:', err?.message || err);
-  });
+export function startClient(): Promise<void> {
+  return initClient();
 }

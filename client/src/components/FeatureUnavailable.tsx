@@ -62,13 +62,6 @@ export const FeatureUnavailable: React.FC<FeatureUnavailableProps> = ({
           >
             Войти
           </Link>
-          <Link
-            to="/register"
-            state={authState}
-            className="inline-flex w-full justify-center rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-300 sm:w-auto"
-          >
-            Зарегистрироваться
-          </Link>
         </div>
       )}
 

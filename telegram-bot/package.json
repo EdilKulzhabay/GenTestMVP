@@ -1,0 +1,24 @@
+{
+  "name": "gentest-telegram-bot",
+  "version": "1.0.0",
+  "description": "Telegram бот для OTP и webhook (GenTest MVP)",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node src/poll.ts",
+    "dev:webhook": "ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "webhook": "ts-node scripts/set-webhook.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "mongoose": "^8.0.3"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}

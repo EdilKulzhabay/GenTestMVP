@@ -13,20 +13,28 @@
 git clone <repo-url> && cd GenTestMVP
 
 # 2. Установить зависимости
-cd server && npm install
-cd ../client && npm install
+cd server && npm install && cd ..
+cd client && npm install && cd ..
+cd whatsapp-bot && npm install && cd ..
+cd telegram-bot && npm install && cd ..
 
 # 3. Настроить окружение
-cp server/.env.example server/.env   # отредактировать
+cp server/env.example server/.env
+cp whatsapp-bot/.env.example whatsapp-bot/.env
+cp telegram-bot/.env.example telegram-bot/.env
+# Отредактировать .env (MONGODB_URI, TELEGRAM_BOT_TOKEN, WHATSAPP_BOT_URL)
 
-# 4. Создать администратора
+# 4. Создать администратора (после запуска server)
 curl -X POST http://localhost:5000/api/v1/auth/create-admin \
   -H "Content-Type: application/json" \
   -d '{"fullName":"Admin","userName":"admin","password":"admin123"}'
 
-# 5. Запустить (два терминала)
-cd server && npm run dev       # API — http://localhost:5000
-cd client && npm run dev       # SPA — http://localhost:5173
+# 5. Запустить (4 терминала)
+cd server && npm run dev           # API — http://localhost:5000
+cd client && npm run dev           # SPA — http://localhost:5173
+cd whatsapp-bot && npm run dev     # WhatsApp OTP — порт 5112
+cd telegram-bot && npm run dev     # Telegram webhook — порт 5113
+# Для localhost без ngrok: telegram-bot npm run dev:poll
 ```
 
 ## Импорт учебного контента
@@ -68,10 +76,9 @@ curl -X POST http://localhost:5000/api/v1/subjects/import \
 | `GOOGLE_CLIENT_SECRET` | нет | — | Google OAuth Client Secret |
 | `GOOGLE_CALLBACK_URL` | нет | — | Callback URL для Google (например `https://your-domain.com/api/v1/auth/google/callback`) |
 | `FRONTEND_URL` | нет | — | URL фронтенда для редиректа после Google OAuth |
-| `TWILIO_ACCOUNT_SID` | нет | — | Twilio Account SID (для WhatsApp) |
-| `TWILIO_AUTH_TOKEN` | нет | — | Twilio Auth Token |
-| `TWILIO_WHATSAPP_FROM` | нет | — | WhatsApp-номер Twilio (например `whatsapp:+14155238886`) |
-| `TELEGRAM_BOT_TOKEN` | нет | — | Токен Telegram-бота (fallback, если WhatsApp не сработал) |
+| `TELEGRAM_BOT_TOKEN` | нет | — | Токен Telegram-бота |
+| `TELEGRAM_BOT_USERNAME` | нет | — | Username бота (для ссылки t.me/bot?start=...) |
+| `WHATSAPP_BOT_URL` | нет | — | URL whatsapp-bot (http://localhost:5112) |
 
 ### client/.env
 
@@ -94,6 +101,9 @@ curl -X POST http://localhost:5000/api/v1/subjects/import \
 ```
 GenTestMVP/
 ├── subject.json                # Пример данных для импорта
+├── ecosystem.config.js         # PM2 — server + whatsapp-bot + telegram-bot
+├── whatsapp-bot/               # WhatsApp Web для OTP (отдельный сервис)
+├── telegram-bot/               # Telegram webhook + poll (отдельный сервис)
 ├── client/src/
 │   ├── api/                    # Axios-клиенты к API
 │   ├── components/             # UI-компоненты, layouts, ErrorBoundary
@@ -152,6 +162,20 @@ GenTestMVP/
 | `npm run dev` | Запуск в dev-режиме (nodemon + ts-node) |
 | `npm run build` | Компиляция TypeScript |
 | `npm start` | Запуск из dist/ |
+
+### WhatsApp Bot (whatsapp-bot/)
+| Команда | Описание |
+|---------|----------|
+| `npm run dev` | Запуск (порт 5112), API: POST /send { phone, text } |
+| `npm run build` | Компиляция |
+| `npm start` | Запуск из dist/ |
+
+### Telegram Bot (telegram-bot/)
+| Команда | Описание |
+|---------|----------|
+| `npm run dev` | Webhook-сервер (порт 5113) |
+| `npm run dev:poll` | Long Polling (для localhost без ngrok) |
+| `npm run webhook -- <URL>` | Установить webhook (напр. https://your-domain.com) |
 
 ### Client
 | Команда | Описание |

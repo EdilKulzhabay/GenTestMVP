@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
+import { MathText } from '../../components/MathText';
 import { getLastResult } from '../../utils/session';
 
 export const TestResultPage: React.FC = () => {
@@ -29,15 +30,15 @@ export const TestResultPage: React.FC = () => {
 
       <div className="card space-y-3">
         <h2 className="text-lg font-semibold text-slate-900">AI анализ</h2>
-        <p className="text-sm text-slate-600">{result.aiFeedback.summary}</p>
+        <p className="text-sm text-slate-600"><MathText>{result.aiFeedback.summary}</MathText></p>
         {result.aiFeedback.mistakes.length === 0 ? (
           <p className="text-sm text-emerald-600">Ошибок не найдено. Отлично!</p>
         ) : (
           <div className="space-y-3">
             {result.aiFeedback.mistakes.map((mistake, index) => (
               <div key={index} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm font-medium text-slate-900">{mistake.question}</p>
-                <p className="text-sm text-slate-600">{mistake.explanation}</p>
+                <p className="text-sm font-medium text-slate-900"><MathText>{mistake.question}</MathText></p>
+                <p className="text-sm text-slate-600"><MathText>{mistake.explanation}</MathText></p>
                 <p className="text-xs text-slate-500">
                   Где перечитать: {mistake.whereToRead.bookTitle} • {mistake.whereToRead.chapterTitle} •
                   стр. {mistake.whereToRead.pages.join(', ')}

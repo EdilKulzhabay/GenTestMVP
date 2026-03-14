@@ -3,7 +3,6 @@ import { ApiResponse } from '../types/api.types';
 import {
   AuthPayload,
   LoginRequest,
-  RegisterRequest,
   VerifyPhoneRequest,
   User
 } from '../types/auth.types';
@@ -19,10 +18,10 @@ export const authApi = {
     return data.data.user;
   },
 
-  async register(payload: RegisterRequest): Promise<{ channel?: string; botLink?: string }> {
+  async requestOtp(phone: string): Promise<{ channel?: string; botLink?: string }> {
     const { data } = await axiosInstance.post<ApiResponse<{ channel?: string; botLink?: string }>>(
-      '/auth/register',
-      payload
+      '/auth/request-otp',
+      { phone }
     );
     return data.data ?? {};
   },
@@ -32,7 +31,9 @@ export const authApi = {
       '/auth/verify-phone',
       payload
     );
-    return data.data.user;
+    const user = data.data?.user;
+    if (!user) throw new Error('Invalid response from server');
+    return user;
   },
 
   getGoogleAuthUrl(): string {

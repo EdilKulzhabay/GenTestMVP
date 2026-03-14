@@ -62,6 +62,7 @@ class AIService {
       '- correctOption должен быть одним из options.',
       '- aiExplanation краткое (1-2 предложения).',
       '- relatedContent.pages — массив номеров страниц (можно приблизительно).',
+      '- Если в контенте есть формулы LaTeX ($...$ или $$...$$), сохраняй их в questionText, options и aiExplanation.',
       _previousQuestions.length > 0 ? `- Избегай этих вопросов: ${_previousQuestions.join(' | ')}` : '',
       'Контент:',
       content.text

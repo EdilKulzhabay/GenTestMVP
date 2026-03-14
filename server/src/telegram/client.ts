@@ -9,6 +9,18 @@ function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, '');
 }
 
+/** Варианты номера для поиска (8XXXXXXXXXX и 7XXXXXXXXXX для России) */
+function getPhoneVariants(phone: string): string[] {
+  const digits = normalizePhone(phone);
+  const variants = [digits];
+  if (digits.length === 11 && digits.startsWith('8')) {
+    variants.push('7' + digits.slice(1));
+  } else if (digits.length === 11 && digits.startsWith('7')) {
+    variants.push('8' + digits.slice(1));
+  }
+  return [...new Set(variants)];
+}
+
 /**
  * Отправляет сообщение на указанный номер через Telegram-бота.
  * Номер должен быть предварительно связан с chat_id (пользователь написал боту /start +номер).
@@ -25,9 +37,9 @@ export async function sendMessage(phone: string, text: string): Promise<boolean>
     return false;
   }
 
-  const normalized = normalizePhone(phone);
+  const variants = getPhoneVariants(phone);
   const link = await TelegramPhoneLink.findOne({
-    $or: [{ phone: normalized }, { phone: phone.trim() }]
+    phone: { $in: variants }
   });
 
   if (!link) {
@@ -58,44 +70,3 @@ export async function sendMessage(phone: string, text: string): Promise<boolean>
   }
 }
 
-/**
- * Отправляет сообщение в чат по chat_id (для ответов в webhook).
- */
-export async function sendMessageToChat(chatId: number, text: string): Promise<boolean> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) {
-    console.warn('[Telegram] sendMessageToChat: TELEGRAM_BOT_TOKEN не задан');
-    return false;
-  }
-  try {
-    const url = `https://api.telegram.org/bot${token}/sendMessage`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text })
-    });
-    const data = (await res.json()) as { ok?: boolean; description?: string };
-    if (!data.ok) {
-      console.error('[Telegram] sendMessageToChat error chatId=', chatId, data.description);
-      return false;
-    }
-    console.log('[Telegram] sendMessageToChat: ответ отправлен chatId=', chatId);
-    return true;
-  } catch (err) {
-    console.error('[Telegram] sendMessageToChat:', err);
-    return false;
-  }
-}
-
-/**
- * Сохраняет связь phone → chatId (вызывается из webhook при /start +номер).
- */
-export async function linkPhoneToChat(phone: string, chatId: number): Promise<void> {
-  const normalized = normalizePhone(phone);
-  await TelegramPhoneLink.findOneAndUpdate(
-    { phone: normalized },
-    { phone: normalized, chatId },
-    { upsert: true, new: true }
-  );
-  console.log('[Telegram] linkPhoneToChat: привязан', normalized, '-> chatId', chatId);
-}

@@ -1,19 +1,15 @@
 /**
- * Telegram бот в режиме Long Polling — работает на localhost БЕЗ ngrok.
- *
- * Запуск: npm run telegram:poll
- *
- * Нужно запустить в ОТДЕЛЬНОМ терминале (параллельно с npm run dev).
- * Сервер (npm run dev) и бот (npm run telegram:poll) работают одновременно.
+ * Telegram бот в режиме Long Polling — для localhost без ngrok.
+ * Запуск: npm run dev:poll
  */
 
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import { PendingRegistration } from '../src/models';
-import { linkPhoneToChat, sendMessageToChat } from '../src/telegram';
+import { PendingRegistration } from './models';
+import { linkPhoneToChat, sendMessageToChat } from './client';
 
 const OTP_TEXT = (code: string) =>
-  `Ваш код подтверждения GenTest: ${code}\n\nКод действителен 15 минут.`;
+  `Ваш код подтверждения Edu AI: ${code}\n\nКод действителен 15 минут.`;
 
 function logUser(from: { id?: number; username?: string; first_name?: string; last_name?: string } | undefined): string {
   if (!from) return 'unknown';
@@ -21,7 +17,7 @@ function logUser(from: { id?: number; username?: string; first_name?: string; la
   return parts.join(' ');
 }
 
-async function processUpdate(update: any): Promise<void> {
+async function processUpdate(update: { message?: { text?: string; chat?: { id: number }; from?: unknown }; edited_message?: { text?: string; chat?: { id: number }; from?: unknown } }): Promise<void> {
   const message = update?.message ?? update?.edited_message;
   if (!message?.text) return;
 
@@ -31,11 +27,10 @@ async function processUpdate(update: any): Promise<void> {
   if (!chatId) return;
 
   console.log('[Telegram] ========== Сообщение ==========');
-  console.log('[Telegram] Кто написал:', logUser(from));
+  console.log('[Telegram] Кто написал:', logUser(from as Parameters<typeof logUser>[0]));
   console.log('[Telegram] chatId:', chatId, '| text:', text);
   console.log('[Telegram] ============================');
 
-  // /start 79001234567 или /start +79001234567
   const phoneMatch = text.match(/^\/(?:start|verify)\s*(\+?[\d\s\-()]+)/);
   if (phoneMatch) {
     const phone = phoneMatch[1].replace(/\D/g, '');
@@ -44,23 +39,27 @@ async function processUpdate(update: any): Promise<void> {
       return;
     }
 
+    const phoneVariants = [phone, `+${phone}`];
+    if (phone.length === 11 && phone.startsWith('8')) {
+      phoneVariants.push('7' + phone.slice(1));
+    } else if (phone.length === 11 && phone.startsWith('7')) {
+      phoneVariants.push('8' + phone.slice(1));
+    }
+
     const pending = await PendingRegistration.findOne({
-      $or: [{ phone }, { phone: `+${phone}` }],
+      phone: { $in: phoneVariants },
       verificationCodeExpires: { $gt: new Date() }
     });
 
     if (pending) {
-      console.log('[Telegram] Код отправлен по номеру:', phone);
       await sendMessageToChat(chatId, OTP_TEXT(pending.verificationCode));
     } else {
-      console.log('[Telegram] Привязка номера (нет ожидающей регистрации):', phone);
       await sendMessageToChat(chatId, 'Номер привязан. Теперь вы будете получать коды подтверждения в Telegram.');
     }
     await linkPhoneToChat(phone, chatId);
     return;
   }
 
-  // /start без параметров
   if (/^\/(?:start|verify)\s*$/.test(text) || text === '/start' || text === '/verify') {
     await sendMessageToChat(chatId, 'Бот работает');
   }
@@ -77,7 +76,6 @@ async function main(): Promise<void> {
   await mongoose.connect(mongoURI);
   console.log('✅ MongoDB подключена');
 
-  // Удаляем webhook, чтобы использовать getUpdates
   const delRes = await fetch(`https://api.telegram.org/bot${token}/deleteWebhook`);
   const delData = (await delRes.json()) as { ok?: boolean };
   if (delData.ok) {

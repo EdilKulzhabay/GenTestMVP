@@ -1,11 +1,7 @@
 /**
  * Установка webhook для Telegram-бота.
- * Запуск: npx ts-node scripts/set-telegram-webhook.ts https://your-ngrok-url.ngrok.io
- *
- * Для локальной разработки:
- * 1. Запустите ngrok: ngrok http 5111
- * 2. Скопируйте HTTPS URL (например https://abc123.ngrok.io)
- * 3. Запустите: npx ts-node scripts/set-telegram-webhook.ts https://abc123.ngrok.io
+ * Запуск: npm run webhook -- https://your-domain.com
+ * Для localhost: используйте ngrok и перейдите в dev:poll.
  */
 
 import 'dotenv/config';
@@ -19,12 +15,14 @@ if (!token) {
 }
 
 if (!baseUrl) {
-  console.error('Использование: npx ts-node scripts/set-telegram-webhook.ts <URL>');
-  console.error('Пример: npx ts-node scripts/set-telegram-webhook.ts https://abc123.ngrok.io');
+  console.error('Использование: npm run webhook -- <BASE_URL>');
+  console.error('Пример: npm run webhook -- https://your-domain.com');
+  console.error('Webhook будет: BASE_URL/webhooks/telegram');
   process.exit(1);
 }
 
-const webhookUrl = `${baseUrl}/api/v1/webhooks/telegram`;
+const webhookPath = process.env.TELEGRAM_WEBHOOK_PATH || '/webhooks/telegram';
+const webhookUrl = `${baseUrl}${webhookPath}`;
 
 async function setWebhook(): Promise<void> {
   console.log('Установка webhook:', webhookUrl);

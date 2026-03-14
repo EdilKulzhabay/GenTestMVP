@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { User, PendingRegistration } from '../models';
-import { IRegisterDTO, IVerifyPhoneDTO, ILoginDTO, IAuthResponse, UserRole } from '../types';
+import { IVerifyPhoneDTO, ILoginDTO, IAuthResponse, UserRole } from '../types';
 import { generateToken, success, AppError } from '../utils';
 import { sendVerificationCodeToPhone } from '../services/messaging.service';
 
@@ -29,30 +29,21 @@ class AuthController {
     };
   }
 
-  /** POST /auth/register — шаг 1: отправка кода на телефон (WhatsApp → Telegram) */
-  async register(req: Request, res: Response): Promise<void> {
-    const { fullName, email, userName, password, phone }: IRegisterDTO = req.body;
-    const emailLower = email.toLowerCase().trim();
-    const userNameLower = userName.toLowerCase().trim();
-    const phoneTrimmed = phone.replace(/\D/g, '').trim() || phone.trim();
+  /** POST /auth/request-otp — отправка кода на телефон (WhatsApp → Telegram) */
+  async requestOtp(req: Request, res: Response): Promise<void> {
+    const { phone } = req.body;
+    const phoneTrimmed = (phone || '').replace(/\D/g, '').trim() || (phone || '').trim();
 
-    if (!phoneTrimmed) throw AppError.badRequest('Phone number is required');
-
-    const existing = await User.findOne({
-      $or: [{ userName: userNameLower }, { email: emailLower }, { phone: phoneTrimmed }]
-    });
-    if (existing) throw AppError.badRequest('User with this email, userName or phone already exists');
+    if (!phoneTrimmed || phoneTrimmed.length < 10) {
+      throw AppError.badRequest('Введите номер телефона');
+    }
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const expires = new Date(Date.now() + 15 * 60 * 1000);
 
-    await PendingRegistration.deleteMany({ $or: [{ email: emailLower }, { phone: phoneTrimmed }] });
+    await PendingRegistration.deleteMany({ phone: phoneTrimmed });
     await PendingRegistration.create({
-      email: emailLower,
       phone: phoneTrimmed,
-      fullName,
-      userName: userNameLower,
-      password,
       verificationCode: code,
       verificationCodeExpires: expires
     });
@@ -61,10 +52,10 @@ class AuthController {
     const channelMsg = result.channel === 'telegram' ? 'Telegram' : result.channel === 'whatsapp' ? 'WhatsApp' : 'сообщение';
     const data: { channel?: string; botLink?: string } = { channel: result.channel };
     if (result.botLink) data.botLink = result.botLink;
-    success(res, data, result.sent ? `Verification code sent via ${channelMsg}` : 'Use the bot link to get your code');
+    success(res, data, result.sent ? `Код отправлен в ${channelMsg}` : 'Используйте ссылку на бота для получения кода');
   }
 
-  /** POST /auth/verify-phone — шаг 2: подтверждение кода */
+  /** POST /auth/verify-phone — подтверждение кода и вход */
   async verifyPhone(req: Request, res: Response): Promise<void> {
     const { phone, code }: IVerifyPhoneDTO = req.body;
     const phoneTrimmed = phone.replace(/\D/g, '').trim() || phone.trim();
@@ -72,38 +63,64 @@ class AuthController {
     const pending = await PendingRegistration.findOne({
       $or: [{ phone: phoneTrimmed }, { phone: phone }]
     });
-    if (!pending) throw AppError.badRequest('Invalid or expired verification code');
-    if (pending.verificationCode !== code.trim()) throw AppError.badRequest('Invalid verification code');
+    if (!pending) throw AppError.badRequest('Неверный или просроченный код');
+    if (pending.verificationCode !== code.trim()) throw AppError.badRequest('Неверный код');
     if (new Date() > pending.verificationCodeExpires) {
       await PendingRegistration.deleteOne({ _id: pending._id });
-      throw AppError.badRequest('Verification code expired. Please register again.');
+      throw AppError.badRequest('Код истёк. Запросите новый.');
     }
 
-    const existing = await User.findOne({
-      $or: [{ userName: pending.userName }, { email: pending.email }, { phone: pending.phone }]
-    });
-    if (existing) {
+    let user = await User.findOne({ $or: [{ phone: phoneTrimmed }, { phone: pending.phone }] });
+
+    if (user) {
       await PendingRegistration.deleteOne({ _id: pending._id });
-      throw AppError.badRequest('User already exists');
+      const response = this.buildAuthResponse(user);
+      this.setAuthCookie(res, response.token);
+      success(res, response, 'Вход выполнен');
+      return;
     }
 
-    const user = await User.create({
-      fullName: pending.fullName,
-      userName: pending.userName,
-      email: pending.email,
-      phone: pending.phone,
-      password: pending.password as string,
-      role: UserRole.USER,
-      testHistory: []
-    });
-    await PendingRegistration.deleteOne({ _id: pending._id });
+    if (pending.fullName && pending.userName && pending.password) {
+      const existing = await User.findOne({
+        $or: [{ userName: pending.userName }, { email: pending.email || '' }, { phone: pending.phone }]
+      });
+      if (existing) {
+        await PendingRegistration.deleteOne({ _id: pending._id });
+        throw AppError.badRequest('Пользователь уже существует');
+      }
+      user = await User.create({
+        fullName: pending.fullName,
+        userName: pending.userName,
+        email: pending.email || undefined,
+        phone: pending.phone,
+        password: pending.password,
+        role: UserRole.USER,
+        testHistory: []
+      });
+    } else {
+      const baseName = `user_${phoneTrimmed.slice(-8)}`;
+      let userName = baseName;
+      let attempts = 0;
+      while (await User.findOne({ userName }) && attempts < 10) {
+        userName = `${baseName}_${Date.now().toString(36).slice(-4)}`;
+        attempts++;
+      }
+      user = await User.create({
+        fullName: 'Пользователь',
+        userName,
+        phone: pending.phone,
+        role: UserRole.USER,
+        testHistory: []
+      });
+    }
 
+    await PendingRegistration.deleteOne({ _id: pending._id });
     const response = this.buildAuthResponse(user);
     this.setAuthCookie(res, response.token);
-    success(res, response, 'User registered successfully', 201);
+    success(res, response, 'Вход выполнен', 201);
   }
 
-  /** POST /auth/login */
+  /** POST /auth/login — оставлен для совместимости (create-admin) */
   async login(req: Request, res: Response): Promise<void> {
     const { userName, password }: ILoginDTO = req.body;
 

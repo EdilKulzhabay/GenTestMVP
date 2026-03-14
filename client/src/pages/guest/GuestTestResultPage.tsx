@@ -48,29 +48,20 @@ export const GuestTestResultPage: React.FC = () => {
         <p className="text-sm text-slate-600">{summaryTeaser}</p>
         <p className="text-sm font-medium text-amber-800">
           Полный результат с разбором ошибок, объяснениями и ссылками на места в книге доступен
-          после входа или регистрации.
+          после входа.
         </p>
       </div>
 
       <div className="flex flex-col gap-3">
-        <p className="text-sm text-slate-600">Войдите или зарегистрируйтесь, чтобы увидеть:</p>
+        <p className="text-sm text-slate-600">Войдите, чтобы увидеть:</p>
         <ul className="list-inside list-disc text-sm text-slate-600">
           <li>Подробный разбор каждой ошибки</li>
           <li>Рекомендации, что перечитать</li>
           <li>Историю всех тестов</li>
         </ul>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button onClick={() => handleAuthClick('/login')} className="flex-1">
-            Войти
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => handleAuthClick('/register')}
-            className="flex-1"
-          >
-            Зарегистрироваться
-          </Button>
-        </div>
+        <Button onClick={() => handleAuthClick('/login')} className="w-full">
+          Войти
+        </Button>
       </div>
 
       <Link to="/guest/subjects">

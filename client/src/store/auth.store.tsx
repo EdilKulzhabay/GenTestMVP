@@ -4,7 +4,6 @@ import { authApi } from '../api/auth.api';
 import { testApi } from '../api/test.api';
 import {
   LoginRequest,
-  RegisterRequest,
   VerifyPhoneRequest,
   User
 } from '../types/auth.types';
@@ -33,7 +32,7 @@ export const authStore = {
   }
 };
 
-interface RegisterResult {
+interface RequestOtpResult {
   channel?: string;
   botLink?: string;
 }
@@ -43,7 +42,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (payload: LoginRequest) => Promise<User>;
-  register: (payload: RegisterRequest) => Promise<RegisterResult>;
+  requestOtp: (phone: string) => Promise<RequestOtpResult>;
   verifyPhone: (payload: VerifyPhoneRequest) => Promise<User>;
   logout: () => void;
   refresh: () => Promise<void>;
@@ -90,8 +89,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return user;
   }, []);
 
-  const register = useCallback(async (payload: RegisterRequest) => {
-    return authApi.register(payload);
+  const requestOtp = useCallback(async (phone: string) => {
+    return authApi.requestOtp(phone);
   }, []);
 
   const verifyPhone = useCallback(async (payload: VerifyPhoneRequest) => {
@@ -111,12 +110,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isAuthenticated: Boolean(storeState.user),
       isLoading,
       login,
-      register,
+      requestOtp,
       verifyPhone,
       logout,
       refresh
     }),
-    [storeState.user, isLoading, login, register, verifyPhone, logout, refresh]
+    [storeState.user, isLoading, login, requestOtp, verifyPhone, logout, refresh]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

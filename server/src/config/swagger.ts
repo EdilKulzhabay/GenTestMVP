@@ -3,7 +3,7 @@ import { API_BASE_PATH } from './constants';
 const swaggerSpec = {
   openapi: '3.0.0',
   info: {
-    title: 'GenTest MVP API',
+    title: 'Edu AI MVP API',
     version: '1.0.0',
     description: `API платформы для AI-генерации тестов по учебному контенту. Предметы содержат вложенную структуру: Subject → Book → Chapter → Topic → Paragraph.
 
@@ -19,7 +19,6 @@ const swaggerSpec = {
     { name: 'Subjects', description: 'Управление учебным контентом (предметы, книги, главы, темы, параграфы)' },
     { name: 'Tests', description: 'Генерация и сдача тестов (auth + guest)' },
     { name: 'Users', description: 'Профиль, история тестов, статистика' },
-    { name: 'Webhooks', description: 'Внешние webhook (Telegram-бот)' },
     { name: 'System', description: 'Служебные эндпоинты' }
   ],
   components: {
@@ -426,25 +425,27 @@ const swaggerSpec = {
 
   paths: {
     // ==================== AUTH ====================
-    '/auth/register': {
+    '/auth/request-otp': {
       post: {
         tags: ['Auth'],
-        summary: 'Шаг 1 — регистрация, отправка OTP на телефон',
-        description: 'Отправляет 6-значный код: сначала WhatsApp, при неудаче — Telegram. Если оба недоступны — возвращает botLink (ссылка на Telegram-бота с номером).',
-        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RegisterRequest' } } } },
+        summary: 'Запросить OTP на телефон',
+        description: 'Отправляет 6-значный код: WhatsApp → Telegram. Если оба недоступны — возвращает botLink.',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['phone'], properties: { phone: { type: 'string', example: '+79001234567' } } } } } },
         responses: {
-          200: { description: 'Код отправлен (WhatsApp/Telegram) или возвращена ссылка на бота', content: { 'application/json': { schema: { $ref: '#/components/schemas/RegisterResponse' } } } },
-          400: { description: 'Username/email/phone уже заняты', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }
+          200: { description: 'Код отправлен', content: { 'application/json': { schema: { $ref: '#/components/schemas/RegisterResponse' } } } },
+          400: { description: 'Неверный номер', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }
         }
       }
     },
     '/auth/verify-phone': {
       post: {
         tags: ['Auth'],
-        summary: 'Шаг 2 — подтверждение кода и создание аккаунта',
+        summary: 'Подтвердить код и войти',
+        description: 'Если пользователь существует — вход. Если нет — создаётся аккаунт с минимальными данными.',
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/VerifyPhoneRequest' } } } },
         responses: {
-          201: { description: 'Аккаунт создан, cookie установлен', content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthResponse' } } } },
+          200: { description: 'Вход выполнен, cookie установлен', content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthResponse' } } } },
+          201: { description: 'Аккаунт создан и вход выполнен', content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthResponse' } } } },
           400: { description: 'Неверный или просроченный код', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }
         }
       }
@@ -764,17 +765,6 @@ const swaggerSpec = {
           200: { description: 'Детальная информация о тесте' },
           404: { description: 'Запись не найдена' }
         }
-      }
-    },
-
-    // ==================== WEBHOOKS ====================
-    '/webhooks/telegram': {
-      post: {
-        tags: ['Webhooks'],
-        summary: 'Webhook Telegram-бота',
-        description: 'Вызывается Telegram при сообщениях боту. Обрабатывает /start +номер (привязка) и /start НОМЕР (получение кода). Настройка: npm run telegram:webhook -- https://your-domain.com',
-        requestBody: { content: { 'application/json': { schema: { type: 'object', description: 'Telegram Update object' } } } },
-        responses: { 200: { description: 'OK (Telegram требует 200)' } }
       }
     },
 

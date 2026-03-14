@@ -7,35 +7,18 @@ import { authenticate, asyncHandler, validate } from '../middlewares';
 const router = Router();
 
 /**
- * POST /auth/register — шаг 1: отправка кода на телефон (WhatsApp → Telegram)
+ * POST /auth/request-otp — отправка кода на телефон (WhatsApp → Telegram)
  */
 router.post(
-  '/register',
+  '/request-otp',
   [
-    body('fullName')
-      .trim()
-      .isLength({ min: 2, max: 100 })
-      .withMessage('Full name must be between 2 and 100 characters'),
-    body('email')
-      .trim()
-      .isEmail()
-      .withMessage('Valid email is required'),
     body('phone')
       .trim()
       .isLength({ min: 10 })
-      .withMessage('Valid phone number is required'),
-    body('userName')
-      .trim()
-      .isLength({ min: 3, max: 50 })
-      .withMessage('Username must be between 3 and 50 characters')
-      .matches(/^[a-zA-Z0-9_]+$/)
-      .withMessage('Username can only contain letters, numbers and underscores'),
-    body('password')
-      .isLength({ min: 6 })
-      .withMessage('Password must be at least 6 characters long')
+      .withMessage('Введите номер телефона')
   ],
   validate,
-  asyncHandler(authController.register.bind(authController))
+  asyncHandler(authController.requestOtp.bind(authController))
 );
 
 /**

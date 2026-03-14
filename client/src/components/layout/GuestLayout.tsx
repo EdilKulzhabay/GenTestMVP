@@ -10,28 +10,20 @@ export const GuestLayout: React.FC = () => {
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-800 text-sm font-bold text-white">
               GT
             </div>
-            <span className="hidden text-sm font-semibold text-slate-900 sm:inline">GenTest</span>
+            <span className="hidden text-sm font-semibold text-slate-900 sm:inline">Edu AI</span>
           </Link>
-          <div className="flex items-center gap-2">
-            <Link
-              to="/login"
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
-            >
-              Войти
-            </Link>
-            <Link
-              to="/register"
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-700"
-            >
-              Регистрация
-            </Link>
-          </div>
+          <Link
+            to="/login"
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-700"
+          >
+            Войти
+          </Link>
         </div>
       </header>
       <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
         <div className="mb-5 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-2.5 text-sm text-amber-800">
           <span>⚡</span>
-          <span>Гостевой режим — результаты ограничены. <Link to="/register" className="font-medium underline hover:no-underline">Зарегистрируйтесь</Link> для полного доступа.</span>
+          <span>Гостевой режим — результаты ограничены. <Link to="/login" className="font-medium underline hover:no-underline">Войдите</Link> для полного доступа.</span>
         </div>
         <Outlet />
       </div>

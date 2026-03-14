@@ -1,10 +1,5 @@
 import React from 'react';
-import { NavLink, Outlet, Link } from 'react-router-dom';
-
-const linkClass = ({ isActive }: { isActive: boolean }): string =>
-  `rounded-lg px-4 py-1.5 text-sm font-medium transition ${
-    isActive ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:text-slate-900'
-  }`;
+import { Outlet, Link } from 'react-router-dom';
 
 export const AuthLayout: React.FC = () => {
   return (
@@ -17,16 +12,8 @@ export const AuthLayout: React.FC = () => {
                 GT
               </div>
             </Link>
-            <h1 className="mt-4 text-xl font-semibold text-slate-900">Добро пожаловать</h1>
-            <p className="mt-1 text-sm text-slate-500">Войдите или создайте аккаунт</p>
-          </div>
-          <div className="flex items-center justify-center gap-1 rounded-xl bg-slate-100 p-1">
-            <NavLink to="/login" className={linkClass}>
-              Вход
-            </NavLink>
-            <NavLink to="/register" className={linkClass}>
-              Регистрация
-            </NavLink>
+            <h1 className="mt-4 text-xl font-semibold text-slate-900">Вход</h1>
+            <p className="mt-1 text-sm text-slate-500">По номеру телефона или через Google</p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
             <Outlet />

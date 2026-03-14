@@ -1,5 +1,6 @@
 /**
- * Telegram модуль — отправка OTP через бота.
+ * Telegram модуль — отправка OTP по номеру (через TelegramPhoneLink).
+ * Webhook и linkPhoneToChat — в telegram-bot/
  */
 
-export { sendMessage, sendMessageToChat, linkPhoneToChat } from './client';
+export { sendMessage } from './client';

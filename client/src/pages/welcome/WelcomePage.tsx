@@ -33,7 +33,7 @@ export const WelcomePage: React.FC = () => {
               GT
             </div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-              GenTest
+            Edu AI
             </h1>
             <p className="mt-3 text-base text-slate-500">
               Тесты по учебникам с AI-анализом ошибок
@@ -59,25 +59,16 @@ export const WelcomePage: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex gap-3">
-            <Link
-              to="/login"
-              state={authState}
-              className="flex flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 hover:shadow-md"
-            >
-              Войти
-            </Link>
-            <Link
-              to="/register"
-              state={authState}
-              className="flex flex-1 items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 hover:shadow-md"
-            >
-              Регистрация
-            </Link>
-          </div>
+          <Link
+            to="/login"
+            state={authState}
+            className="flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 hover:shadow-md"
+          >
+            Войти
+          </Link>
 
           <p className="text-xs leading-relaxed text-slate-400">
-            Регистрация даёт полные результаты, AI-разбор ошибок и историю тестов
+            Вход даёт полные результаты, AI-разбор ошибок и историю тестов
           </p>
         </div>
       </div>

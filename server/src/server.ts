@@ -1,16 +1,14 @@
 import './env';
 import app from './app';
 import { connectDB } from './config/db';
-import { startWhatsAppClient } from './whatsapp';
 
 /**
  * SERVER ENTRY POINT
  * Точка входа в приложение
- * 
- * Последовательность запуска:
- * 1. Загрузка переменных окружения (env.ts)
- * 2. Подключение к MongoDB
- * 3. Запуск Express сервера
+ *
+ * WhatsApp и Telegram боты — отдельные сервисы:
+ * - whatsapp-bot: npm run dev (порт 5112)
+ * - telegram-bot: npm run dev (порт 5113)
  */
 
 // Получаем порт из переменных окружения
@@ -41,8 +39,6 @@ const startServer = async (): Promise<void> => {
       console.log(`🚀 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🚀 API URL: http://localhost:${PORT}/api/v1`);
       console.log('🚀 ========================================');
-      // Предзагрузка WhatsApp клиента (не блокирует старт)
-      startWhatsAppClient().catch(() => {});
     });
 
     // Обработка необработанных promise rejections

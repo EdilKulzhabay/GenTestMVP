@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import { testApi } from '../../api/test.api';
 import { Button } from '../../components/ui/Button';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
+import { MathText } from '../../components/MathText';
 import { getApiErrorMessage } from '../../utils/error';
 import {
   clearCurrentTest,
@@ -131,7 +132,7 @@ export const TestPage: React.FC = () => {
         {test.questions.map((question, index) => (
           <div key={question.questionText} className="card space-y-3">
             <p className="text-sm font-medium text-slate-900">
-              {index + 1}. {question.questionText}
+              {index + 1}. <MathText>{question.questionText}</MathText>
             </p>
             <div className="space-y-2">
               {question.options.map((option) => (
@@ -141,7 +142,7 @@ export const TestPage: React.FC = () => {
                     value={option}
                     {...register(`answers.${index}` as const)}
                   />
-                  {option}
+                  <MathText>{option}</MathText>
                 </label>
               ))}
             </div>
