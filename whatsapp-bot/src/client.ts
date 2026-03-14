@@ -46,14 +46,24 @@ function initClient(): Promise<void> {
     const puppeteerOpts: Record<string, unknown> = {
       headless: true,
       executablePath: chromePath,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-extensions',
+        '--no-zygote',
+        '--memory-pressure-off'
+      ]
     };
     client = new Client({
       authStrategy: new LocalAuth({
         clientId: 'gentest_otp',
         dataPath
       }),
-      puppeteer: puppeteerOpts
+      puppeteer: puppeteerOpts,
+      authTimeoutMs: 120000 // 2 минуты — на медленных серверах QR появляется дольше
     });
 
     client.on('qr', async (qr: string) => {
@@ -101,7 +111,10 @@ function initClient(): Promise<void> {
       console.warn('[WhatsApp] Отключено:', reason);
     });
 
-    client.initialize().catch(reject);
+    client.initialize().catch((err) => {
+      initPromise = null; // сброс для повторной попытки
+      reject(err);
+    });
   });
 
   return initPromise;

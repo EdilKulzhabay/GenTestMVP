@@ -108,9 +108,19 @@ if (!enabled) {
     console.log(`   GET  http://localhost:${PORT}/health`);
     console.log(`   GET  http://localhost:${PORT}/qr-page — QR-код для аутентификации (откройте в браузере)`);
     console.log('');
-    // Инициализация WhatsApp — QR появится в консоли или в .wwebjs_auth/qr.png
-    startClient().catch((err) => {
-      console.warn('[WhatsApp Bot] Предзагрузка не удалась:', err?.message || err);
-    });
+    // Инициализация WhatsApp — с повтором при auth timeout
+    async function initWithRetry(attempt = 1): Promise<void> {
+      try {
+        await startClient();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[WhatsApp Bot] Предзагрузка не удалась (попытка ${attempt}):`, msg);
+        if (msg.includes('auth timeout') && attempt < 5) {
+          console.log(`[WhatsApp Bot] Повтор через 30 сек...`);
+          setTimeout(() => initWithRetry(attempt + 1), 30000);
+        }
+      }
+    }
+    void initWithRetry();
   });
 }
