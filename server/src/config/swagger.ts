@@ -3,23 +3,28 @@ import { API_BASE_PATH } from './constants';
 const swaggerSpec = {
   openapi: '3.0.0',
   info: {
-    title: 'Edu AI MVP API',
+    title: 'GenTest API',
     version: '1.0.0',
-    description: `API платформы для AI-генерации тестов по учебному контенту. Предметы содержат вложенную структуру: Subject → Book → Chapter → Topic → Paragraph.
+    description: `API платформы для AI-генерации тестов по учебному контенту.
 
-**Базовый путь:** все эндпоинты имеют префикс \`${API_BASE_PATH}\` (например: \`${API_BASE_PATH}/auth/login\`).`
+**Авторизация:** OTP (WhatsApp/Telegram) или Google OAuth. JWT передаётся в cookie \`token\` или в заголовке \`Authorization: Bearer <token>\`.
+
+**Структура контента:** Subject → Book → Chapter → Topic → Paragraph.
+
+**Базовый путь:** \`${API_BASE_PATH}\``,
+    contact: { name: 'GenTest', url: 'https://kakoi-to-do-men.ru' }
   },
   servers: [
+    { url: `https://kakoi-to-do-men.ru${API_BASE_PATH}`, description: 'Production' },
     { url: `http://localhost:5111${API_BASE_PATH}`, description: 'Development (port 5111)' },
-    { url: `http://localhost:5000${API_BASE_PATH}`, description: 'Development (port 5000)' },
-    { url: `https://kakoi-to-do-men.ru${API_BASE_PATH}`, description: 'Production' }
+    { url: `http://localhost:5000${API_BASE_PATH}`, description: 'Development (port 5000)' }
   ],
   tags: [
-    { name: 'Auth', description: 'Регистрация (WhatsApp/Telegram OTP), вход, Google OAuth' },
-    { name: 'Subjects', description: 'Управление учебным контентом (предметы, книги, главы, темы, параграфы)' },
-    { name: 'Tests', description: 'Генерация и сдача тестов (auth + guest)' },
-    { name: 'Users', description: 'Профиль, история тестов, статистика' },
-    { name: 'System', description: 'Служебные эндпоинты' }
+    { name: 'Auth', description: 'OTP (request-otp → verify-phone), Google OAuth, login, create-admin' },
+    { name: 'Subjects', description: 'Предметы, книги, главы, темы, параграфы. Публичный список, admin — создание/импорт' },
+    { name: 'Tests', description: 'Генерация (auth/guest), отправка ответов, привязка гостевого теста' },
+    { name: 'Users', description: 'Профиль, история тестов, статистика (требует auth)' },
+    { name: 'System', description: 'Health check, отладка' }
   ],
   components: {
     securitySchemes: {
@@ -31,7 +36,18 @@ const swaggerSpec = {
         type: 'object',
         properties: {
           success: { type: 'boolean', example: false },
-          message: { type: 'string' }
+          message: { type: 'string', example: 'Validation failed' },
+          errors: {
+            type: 'array',
+            items: { type: 'object', properties: { field: { type: 'string' }, message: { type: 'string' } } }
+          }
+        }
+      },
+      RequestOtpRequest: {
+        type: 'object',
+        required: ['phone'],
+        properties: {
+          phone: { type: 'string', example: '+79001234567', minLength: 10, description: 'Номер в любом формате (8/7, с пробелами)' }
         }
       },
       SuccessResponse: {
@@ -87,7 +103,7 @@ const swaggerSpec = {
           data: {
             type: 'object',
             properties: {
-              token: { type: 'string' },
+              token: { type: 'string', description: 'JWT (устанавливается в cookie при verify-phone/login)' },
               user: {
                 type: 'object',
                 properties: {
@@ -95,6 +111,7 @@ const swaggerSpec = {
                   fullName: { type: 'string' },
                   userName: { type: 'string' },
                   email: { type: 'string' },
+                  phone: { type: 'string', description: 'Номер телефона (при OTP-входе)' },
                   role: { type: 'string', enum: ['admin', 'user'] }
                 }
               }
@@ -265,9 +282,10 @@ const swaggerSpec = {
         properties: {
           subjectId: { type: 'string', description: 'MongoDB ObjectId предмета' },
           bookId: { type: 'string', description: 'MongoDB ObjectId книги' },
-          chapterId: { type: 'string', description: 'MongoDB ObjectId главы (если не fullBook)' },
-          fullBook: { type: 'boolean', default: false, description: 'Тест по всей книге' }
-        }
+          chapterId: { type: 'string', description: 'MongoDB ObjectId главы (опционально, если fullBook=false)' },
+          fullBook: { type: 'boolean', default: false, description: 'true — тест по всей книге, false — по главе' }
+        },
+        example: { subjectId: '507f1f77bcf86cd799439011', bookId: '507f1f77bcf86cd799439012', chapterId: '507f1f77bcf86cd799439013', fullBook: false }
       },
       GeneratedTest: {
         type: 'object',
@@ -419,6 +437,14 @@ const swaggerSpec = {
             }
           }
         }
+      },
+      PaginationQuery: {
+        type: 'object',
+        properties: {
+          limit: { type: 'integer', minimum: 1, default: 20, description: 'Количество записей' },
+          sortBy: { type: 'string', enum: ['createdAt', 'scorePercent'] },
+          order: { type: 'string', enum: ['asc', 'desc'] }
+        }
       }
     }
   },
@@ -429,11 +455,23 @@ const swaggerSpec = {
       post: {
         tags: ['Auth'],
         summary: 'Запросить OTP на телефон',
-        description: 'Отправляет 6-значный код: WhatsApp → Telegram. Если оба недоступны — возвращает botLink.',
-        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['phone'], properties: { phone: { type: 'string', example: '+79001234567' } } } } } },
+        description: `Отправляет 6-значный код. Приоритет: **WhatsApp** (whatsapp-bot) → **Telegram** (если номер привязан через /start +номер). Если оба недоступны — возвращает \`botLink\` (ссылка на Telegram-бота).`,
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RequestOtpRequest' } } } },
         responses: {
-          200: { description: 'Код отправлен', content: { 'application/json': { schema: { $ref: '#/components/schemas/RegisterResponse' } } } },
-          400: { description: 'Неверный номер', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }
+          200: {
+            description: 'Код отправлен',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/RegisterResponse' },
+                examples: {
+                  whatsapp: { value: { success: true, message: 'Код отправлен в WhatsApp', data: { channel: 'whatsapp' } } },
+                  telegram: { value: { success: true, message: 'Код отправлен в Telegram', data: { channel: 'telegram' } } },
+                  botLink: { value: { success: true, message: 'Используйте ссылку на бота для получения кода', data: { botLink: 'https://t.me/bot?start=79001234567' } } }
+                }
+              }
+            }
+          },
+          400: { description: 'Неверный номер (меньше 10 цифр)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }
         }
       }
     },
@@ -441,7 +479,7 @@ const swaggerSpec = {
       post: {
         tags: ['Auth'],
         summary: 'Подтвердить код и войти',
-        description: 'Если пользователь существует — вход. Если нет — создаётся аккаунт с минимальными данными.',
+        description: 'Шаг 2 после request-otp. Если пользователь существует — вход. Если нет — создаётся аккаунт (userName: user_XXXXXXXX). JWT устанавливается в cookie.',
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/VerifyPhoneRequest' } } } },
         responses: {
           200: { description: 'Вход выполнен, cookie установлен', content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthResponse' } } } },
@@ -505,7 +543,8 @@ const swaggerSpec = {
       get: {
         tags: ['Subjects'],
         summary: 'Список всех предметов',
-        description: 'Публичный. Возвращает предметы с массивом books (для подсчёта).',
+        operationId: 'getSubjects',
+        description: 'Публичный. Возвращает предметы с массивом books (для выбора в UI).',
         responses: {
           200: {
             description: 'Массив предметов',
@@ -651,6 +690,7 @@ const swaggerSpec = {
       post: {
         tags: ['Tests'],
         summary: 'Сгенерировать тест (auth)',
+        operationId: 'generateTest',
         security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/GenerateTestRequest' } } } },
         responses: {
@@ -662,7 +702,8 @@ const swaggerSpec = {
     '/tests/generate-guest': {
       post: {
         tags: ['Tests'],
-        summary: 'Сгенерировать тест (гость, без авторизации)',
+        summary: 'Сгенерировать тест (гость)',
+        operationId: 'generateTestGuest',
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/GenerateTestRequest' } } } },
         responses: {
           200: { description: 'Тест сгенерирован', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/GeneratedTest' } } } } } },
