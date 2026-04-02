@@ -2,32 +2,29 @@
  * Markdown + LaTeX (remark-math / rehype-katex): заголовки, списки, **жирный**, формулы $...$ / $$...$$
  */
 import React from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 
-function stripNode<T extends { node?: unknown }>(props: T): Omit<T, 'node'> {
-  const { node: _n, ...rest } = props;
-  return rest;
-}
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function strip({ node: _, ...rest }: any) { return rest; }
 
-const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
-  h1: (props) => <h1 className="mt-3 text-xl font-bold text-slate-900 first:mt-0" {...stripNode(props)} />,
-  h2: (props) => <h2 className="mt-3 text-lg font-semibold text-slate-900 first:mt-0" {...stripNode(props)} />,
-  h3: (props) => <h3 className="mt-2 text-base font-semibold text-slate-800 first:mt-0" {...stripNode(props)} />,
-  p: (props) => <p className="my-2 leading-relaxed text-slate-800 last:mb-0" {...stripNode(props)} />,
-  ul: (props) => <ul className="my-2 list-disc pl-5 text-slate-800" {...stripNode(props)} />,
-  ol: (props) => <ol className="my-2 list-decimal pl-5 text-slate-800" {...stripNode(props)} />,
-  li: (props) => <li className="my-0.5" {...stripNode(props)} />,
-  strong: (props) => <strong className="font-semibold text-slate-900" {...stripNode(props)} />,
-  em: (props) => <em className="italic" {...stripNode(props)} />,
-  code: ({ className, children, node: _n, ...rest }) => {
-    const isBlock = Boolean(className);
-    if (isBlock) {
+const mdComponents: Components = {
+  h1: (p: any) => <h1 className="mt-3 text-xl font-bold text-slate-900 first:mt-0" {...strip(p)} />,
+  h2: (p: any) => <h2 className="mt-3 text-lg font-semibold text-slate-900 first:mt-0" {...strip(p)} />,
+  h3: (p: any) => <h3 className="mt-2 text-base font-semibold text-slate-800 first:mt-0" {...strip(p)} />,
+  p: (p: any) => <p className="my-2 leading-relaxed text-slate-800 last:mb-0" {...strip(p)} />,
+  ul: (p: any) => <ul className="my-2 list-disc pl-5 text-slate-800" {...strip(p)} />,
+  ol: (p: any) => <ol className="my-2 list-decimal pl-5 text-slate-800" {...strip(p)} />,
+  li: (p: any) => <li className="my-0.5" {...strip(p)} />,
+  strong: (p: any) => <strong className="font-semibold text-slate-900" {...strip(p)} />,
+  em: (p: any) => <em className="italic" {...strip(p)} />,
+  code: ({ className, children, node: _, ...rest }: any) => {
+    if (className) {
       return (
-        <code className={`block overflow-x-auto rounded bg-slate-100 p-2 text-xs ${className || ''}`} {...rest}>
+        <code className={`block overflow-x-auto rounded bg-slate-100 p-2 text-xs ${className}`} {...rest}>
           {children}
         </code>
       );
@@ -38,19 +35,20 @@ const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
       </code>
     );
   },
-  pre: (props) => (
-    <pre className="my-2 overflow-x-auto rounded border border-slate-200 bg-slate-50 p-2 text-sm" {...stripNode(props)} />
+  pre: (p: any) => (
+    <pre className="my-2 overflow-x-auto rounded border border-slate-200 bg-slate-50 p-2 text-sm" {...strip(p)} />
   ),
-  blockquote: (props) => (
-    <blockquote className="my-2 border-l-4 border-slate-300 pl-3 italic text-slate-600" {...stripNode(props)} />
+  blockquote: (p: any) => (
+    <blockquote className="my-2 border-l-4 border-slate-300 pl-3 italic text-slate-600" {...strip(p)} />
   ),
-  a: (props) => (
-    <a className="text-blue-600 underline hover:text-blue-800" target="_blank" rel="noreferrer" {...stripNode(props)} />
+  a: (p: any) => (
+    <a className="text-blue-600 underline hover:text-blue-800" target="_blank" rel="noreferrer" {...strip(p)} />
   ),
-  table: (props) => <table className="my-2 w-full border-collapse border border-slate-200 text-sm" {...stripNode(props)} />,
-  th: (props) => <th className="border border-slate-200 bg-slate-100 px-2 py-1 text-left" {...stripNode(props)} />,
-  td: (props) => <td className="border border-slate-200 px-2 py-1" {...stripNode(props)} />
+  table: (p: any) => <table className="my-2 w-full border-collapse border border-slate-200 text-sm" {...strip(p)} />,
+  th: (p: any) => <th className="border border-slate-200 bg-slate-100 px-2 py-1 text-left" {...strip(p)} />,
+  td: (p: any) => <td className="border border-slate-200 px-2 py-1" {...strip(p)} />
 };
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 export const MarkdownMathText: React.FC<{ children: string; className?: string }> = ({
   children,
