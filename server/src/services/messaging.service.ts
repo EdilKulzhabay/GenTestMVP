@@ -21,7 +21,7 @@ const OTP_TEXT = (code: string) =>
   `Ваш код подтверждения Edu AI: ${code}\n\nКод действителен 15 минут.`;
 
 const HARD_TIMEOUT_MS = 4000;
-const WA_HEALTH_TIMEOUT_MS = 300;
+const WA_HEALTH_TIMEOUT_MS = 1500;
 const WA_SEND_TIMEOUT_MS = 2500;
 const TG_SEND_TIMEOUT_MS = 2500;
 
