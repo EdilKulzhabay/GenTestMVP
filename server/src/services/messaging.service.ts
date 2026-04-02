@@ -4,7 +4,7 @@
  * Защита от зависаний:
  * - Circuit breaker: после N фейлов WhatsApp отключается на M минут.
  * - Hard timeout: вся функция гарантированно завершается за HARD_TIMEOUT_MS.
- * - Preflight /health с кэшем (не дёргаем сломанный бот).
+ * - Preflight /health (кэш 2 сек при false, 15 сек при true).
  * - Параллельная отправка WA+TG, берём первый успешный.
  */
 
@@ -30,24 +30,21 @@ const CB_FAIL_THRESHOLD = 2;
 const CB_OPEN_DURATION_MS = 3 * 60 * 1000;
 let cbFailCount = 0;
 let cbOpenUntil = 0;
+
 let waHealthy = false;
 let waHealthCheckedAt = 0;
-const WA_HEALTH_CACHE_MS = 10_000;
+const WA_HEALTH_CACHE_OK_MS = 15_000;
+const WA_HEALTH_CACHE_FAIL_MS = 2_000;
 
-function cbRecordSuccess(): void {
-  cbFailCount = 0;
-}
+function cbRecordSuccess(): void { cbFailCount = 0; }
 function cbRecordFailure(): void {
   cbFailCount++;
   if (cbFailCount >= CB_FAIL_THRESHOLD) {
     cbOpenUntil = Date.now() + CB_OPEN_DURATION_MS;
-    console.warn(`[MESSAGING] Circuit breaker OPEN: WA отключён на ${CB_OPEN_DURATION_MS / 1000}s после ${cbFailCount} ошибок`);
+    console.warn(`[MESSAGING] Circuit breaker OPEN: WA отключён на ${CB_OPEN_DURATION_MS / 1000}s`);
   }
 }
-function cbIsOpen(): boolean {
-  if (Date.now() > cbOpenUntil) return false;
-  return true;
-}
+function cbIsOpen(): boolean { return Date.now() < cbOpenUntil; }
 
 function buildBotLink(phone: string): string {
   const username = process.env.TELEGRAM_BOT_USERNAME?.trim();
@@ -70,7 +67,8 @@ async function checkWhatsAppHealth(): Promise<boolean> {
   if (!isWhatsAppConfigured() || cbIsOpen()) return false;
 
   const now = Date.now();
-  if (now - waHealthCheckedAt < WA_HEALTH_CACHE_MS) return waHealthy;
+  const cacheMs = waHealthy ? WA_HEALTH_CACHE_OK_MS : WA_HEALTH_CACHE_FAIL_MS;
+  if (now - waHealthCheckedAt < cacheMs) return waHealthy;
 
   try {
     const url = process.env.WHATSAPP_BOT_URL!;
@@ -107,19 +105,16 @@ async function sendViaWhatsApp(phone: string, code: string): Promise<boolean> {
     });
     clearTimeout(timeout);
     const data = (await res.json()) as { ok?: boolean; error?: string };
-    const elapsed = Date.now() - t0;
-    console.log(`[MESSAGING] WA: ${data.ok ? 'ok' : 'fail'} ${elapsed}ms`);
-    if (data.ok) {
-      cbRecordSuccess();
-      return true;
-    }
+    console.log(`[MESSAGING] WA: ${data.ok ? 'ok' : 'fail'} ${Date.now() - t0}ms`);
+    if (data.ok) { cbRecordSuccess(); return true; }
     waHealthy = false;
+    waHealthCheckedAt = 0;
     cbRecordFailure();
     return false;
   } catch (err) {
-    const elapsed = Date.now() - t0;
-    console.warn(`[MESSAGING] WA error ${elapsed}ms:`, (err as Error).message ?? err);
+    console.warn(`[MESSAGING] WA error ${Date.now() - t0}ms:`, (err as Error).message ?? err);
     waHealthy = false;
+    waHealthCheckedAt = 0;
     cbRecordFailure();
     return false;
   }
@@ -136,30 +131,28 @@ async function sendViaTelegram(phone: string, code: string): Promise<boolean> {
   return result;
 }
 
-async function sendOtpInternal(
-  phone: string,
-  code: string
-): Promise<SendResult> {
+async function sendOtpInternal(phone: string, code: string): Promise<SendResult> {
   const trimmed = phone.trim();
   const t0 = Date.now();
 
   const waReady = await checkWhatsAppHealth();
-  console.log(`[MESSAGING] WA ready=${waReady} cb_open=${cbIsOpen()} (${Date.now() - t0}ms)`);
+  console.log(`[MESSAGING] WA ready=${waReady} cb=${cbIsOpen() ? 'open' : 'closed'} (${Date.now() - t0}ms)`);
 
   if (waReady) {
     type Chan = 'whatsapp' | 'telegram';
     const first = await new Promise<Chan | null>((resolve) => {
       let settled = false;
+      const guard = setTimeout(() => done(null), Math.max(WA_SEND_TIMEOUT_MS, TG_SEND_TIMEOUT_MS) + 200);
+
       const done = (ch: Chan | null) => {
         if (settled) return;
         settled = true;
+        clearTimeout(guard);
         resolve(ch);
       };
 
       sendViaWhatsApp(trimmed, code).then((ok) => { if (ok) done('whatsapp'); });
       sendViaTelegram(trimmed, code).then((ok) => { if (ok) done('telegram'); });
-
-      setTimeout(() => done(null), Math.max(WA_SEND_TIMEOUT_MS, TG_SEND_TIMEOUT_MS) + 200);
     });
 
     if (first) {
@@ -187,12 +180,17 @@ export async function sendVerificationCodeToPhone(
   phone: string,
   code: string
 ): Promise<SendResult> {
-  const hardTimeout = new Promise<SendResult>((resolve) =>
-    setTimeout(() => {
-      console.error(`[MESSAGING] HARD TIMEOUT ${HARD_TIMEOUT_MS}ms — принудительный fallback`);
+  let hardTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const hardTimeout = new Promise<SendResult>((resolve) => {
+    hardTimer = setTimeout(() => {
+      console.error(`[MESSAGING] HARD TIMEOUT ${HARD_TIMEOUT_MS}ms`);
       const botLink = buildBotLink(phone.trim());
       resolve(botLink ? { sent: false, botLink } : { sent: false, error: 'Timeout' });
-    }, HARD_TIMEOUT_MS)
-  );
-  return Promise.race([sendOtpInternal(phone, code), hardTimeout]);
+    }, HARD_TIMEOUT_MS);
+  });
+
+  const result = await Promise.race([sendOtpInternal(phone, code), hardTimeout]);
+  clearTimeout(hardTimer);
+  return result;
 }
