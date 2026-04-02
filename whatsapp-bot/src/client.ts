@@ -1,6 +1,6 @@
 /**
  * WhatsApp Web клиент на базе whatsapp-web.js.
- * Используется для отправки OTP-кодов верификации.
+ * Отправка OTP. Авто-реинициализация при ошибках Puppeteer.
  */
 
 import { Client, LocalAuth } from 'whatsapp-web.js';
@@ -8,6 +8,14 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 let client: Client | null = null;
+let isReady = false;
+let initPromise: Promise<void> | null = null;
+let isReinitializing = false;
+let consecutiveErrors = 0;
+let lastErrorAt = 0;
+
+const SEND_TIMEOUT_MS = Number(process.env.WHATSAPP_SEND_TIMEOUT_MS || 6000);
+const REINIT_COOLDOWN_MS = 30_000;
 
 const DEFAULT_CHROME_PATHS = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -25,12 +33,23 @@ function findChromeExecutable(): string | undefined {
   return DEFAULT_CHROME_PATHS.find((p) => fs.existsSync(p));
 }
 
-let isReady = false;
-let initPromise: Promise<void> | null = null;
-
 export function formatPhoneForWhatsApp(phone: string): string {
   const digits = phone.replace(/\D/g, '');
   return `${digits}@c.us`;
+}
+
+function isFatalPuppeteerError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes('detached frame') ||
+    lower.includes('getChat') ||
+    lower.includes('protocol') ||
+    lower.includes('timed out') ||
+    lower.includes('session closed') ||
+    lower.includes('target closed') ||
+    lower.includes('execution context was destroyed')
+  );
 }
 
 function initClient(): Promise<void> {
@@ -43,57 +62,48 @@ function initClient(): Promise<void> {
       reject(new Error('Chrome не найден. Установите Google Chrome или укажите CHROME_PATH'));
       return;
     }
-    const puppeteerOpts: Record<string, unknown> = {
-      headless: true,
-      executablePath: chromePath,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-software-rasterizer',
-        '--disable-extensions',
-        '--no-zygote',
-        '--memory-pressure-off'
-      ]
-    };
+
     client = new Client({
-      authStrategy: new LocalAuth({
-        clientId: 'gentest_otp',
-        dataPath
-      }),
-      puppeteer: puppeteerOpts,
-      authTimeoutMs: 120000 // 2 минуты — на медленных серверах QR появляется дольше
+      authStrategy: new LocalAuth({ clientId: 'gentest_otp', dataPath }),
+      puppeteer: {
+        headless: true,
+        executablePath: chromePath,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-software-rasterizer',
+          '--disable-extensions',
+          '--no-zygote',
+          '--memory-pressure-off',
+          '--single-process'
+        ]
+      } as Record<string, unknown>,
+      authTimeoutMs: 120_000
     });
 
     client.on('qr', async (qr: string) => {
-      console.log('[WhatsApp] Отсканируйте QR-код в приложении WhatsApp:');
-      console.log('[WhatsApp] Настройки → Связанные устройства → Привязать устройство');
+      console.log('[WhatsApp] QR получен — сканируйте в WhatsApp → Связанные устройства');
       try {
         const qrcode = require('qrcode-terminal');
         qrcode.generate(qr, { small: true });
-      } catch {
-        // qrcode-terminal может не работать в pm2/headless
-      }
+      } catch { /* noop */ }
       try {
         const qrcodePkg = await import('qrcode');
         const dataUrl = await qrcodePkg.toDataURL(qr);
-        const qrPath = path.join(process.cwd(), '.wwebjs_auth', 'qr.png');
+        const qrPath = path.join(dataPath, 'qr.png');
         const fsAsync = await import('fs/promises');
         await fsAsync.mkdir(path.dirname(qrPath), { recursive: true });
         const base64 = dataUrl.split(',')[1];
-        if (base64) {
-          await fsAsync.writeFile(qrPath, Buffer.from(base64, 'base64'));
-          console.log('[WhatsApp] QR-код сохранён в:', qrPath);
-        }
-      } catch {
-        // qrcode опционален
-      }
+        if (base64) await fsAsync.writeFile(qrPath, Buffer.from(base64, 'base64'));
+      } catch { /* noop */ }
     });
 
     client.on('ready', () => {
       isReady = true;
-      console.log('[WhatsApp] Клиент готов к отправке сообщений');
+      consecutiveErrors = 0;
+      console.log('[WhatsApp] Клиент готов');
       resolve();
     });
 
@@ -102,17 +112,19 @@ function initClient(): Promise<void> {
     });
 
     client.on('auth_failure', (msg: string) => {
-      console.error('[WhatsApp] Ошибка аутентификации:', msg);
+      console.error('[WhatsApp] auth_failure:', msg);
+      markBroken();
       reject(new Error(msg));
     });
 
     client.on('disconnected', (reason: string) => {
-      isReady = false;
-      console.warn('[WhatsApp] Отключено:', reason);
+      console.warn('[WhatsApp] disconnected:', reason);
+      markBroken();
+      scheduleReinit('disconnected');
     });
 
     client.initialize().catch((err) => {
-      initPromise = null; // сброс для повторной попытки
+      markBroken();
       reject(err);
     });
   });
@@ -120,38 +132,87 @@ function initClient(): Promise<void> {
   return initPromise;
 }
 
-export async function sendMessage(phone: string, text: string): Promise<boolean> {
-  if (!client || !isReady) {
-    try {
-      await initClient();
-    } catch (err) {
-      console.error('[WhatsApp] Не удалось инициализировать клиент:', err);
-      return false;
-    }
-  }
+function markBroken(): void {
+  isReady = false;
+  initPromise = null;
+}
 
-  if (!client) return false;
+function scheduleReinit(reason: string): void {
+  if (isReinitializing) return;
+  const now = Date.now();
+  if (now - lastErrorAt < REINIT_COOLDOWN_MS) return;
+  lastErrorAt = now;
+  console.log(`[WhatsApp] Запланирована реинициализация через 10 сек (${reason})`);
+  setTimeout(() => void reinitialize(reason), 10_000);
+}
 
+async function reinitialize(reason: string): Promise<void> {
+  if (isReinitializing) return;
+  isReinitializing = true;
   try {
-    const chatId = formatPhoneForWhatsApp(phone);
-    console.log('[WhatsApp] Отправка на', chatId);
-    await client.sendMessage(chatId, text);
-    console.log('[WhatsApp] Сообщение отправлено');
-    return true;
+    console.warn('[WhatsApp] Реинициализация:', reason);
+    markBroken();
+    if (client) {
+      try { await (client as any).destroy?.(); } catch { /* noop */ }
+      client = null;
+    }
+    await initClient();
+    console.log('[WhatsApp] Реинициализация успешна');
   } catch (err) {
-    console.error('[WhatsApp] Ошибка отправки:', err);
-    return false;
+    console.error('[WhatsApp] Реинициализация не удалась:', err);
+  } finally {
+    isReinitializing = false;
   }
 }
 
 export function isClientReady(): boolean {
-  return isReady && client !== null;
+  return isReady && client !== null && !isReinitializing;
 }
 
-/**
- * Запускает инициализацию клиента при старте.
- * QR-код появится в консоли или в .wwebjs_auth/qr.png
- */
+export async function sendMessage(phone: string, text: string): Promise<boolean> {
+  if (!isClientReady()) {
+    console.warn('[WhatsApp] sendMessage: клиент не готов, отказ');
+    return false;
+  }
+
+  const chatId = formatPhoneForWhatsApp(phone);
+  console.log('[WhatsApp] Отправка на', chatId);
+  const startedAt = Date.now();
+
+  try {
+    const sendPromise = client!.sendMessage(chatId, text).then(() => true);
+    const timeoutPromise = new Promise<false>((resolve) =>
+      setTimeout(() => resolve(false), SEND_TIMEOUT_MS)
+    );
+
+    const sent = await Promise.race([sendPromise, timeoutPromise]);
+    const elapsed = Date.now() - startedAt;
+
+    if (sent) {
+      consecutiveErrors = 0;
+      console.log(`[WhatsApp] Отправлено за ${elapsed}ms`);
+      return true;
+    }
+
+    console.warn(`[WhatsApp] Таймаут ${elapsed}ms`);
+    onSendError('timeout');
+    return false;
+  } catch (err) {
+    const elapsed = Date.now() - startedAt;
+    console.error(`[WhatsApp] Ошибка отправки (${elapsed}ms):`, err);
+    onSendError(isFatalPuppeteerError(err) ? 'fatal' : 'transient');
+    return false;
+  }
+}
+
+function onSendError(kind: 'fatal' | 'transient' | 'timeout'): void {
+  consecutiveErrors++;
+  if (kind === 'fatal' || consecutiveErrors >= 3) {
+    markBroken();
+    scheduleReinit(kind === 'fatal' ? 'puppeteer-error' : `${consecutiveErrors}-consecutive-errors`);
+  }
+}
+
 export function startClient(): Promise<void> {
   return initClient();
 }

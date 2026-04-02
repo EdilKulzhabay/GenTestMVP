@@ -34,6 +34,10 @@ app.post('/send', checkAuth, async (req: Request, res: Response) => {
     res.status(400).json({ ok: false, error: 'phone and text required' });
     return;
   }
+  if (!isClientReady()) {
+    res.json({ ok: false, error: 'whatsapp client not ready' });
+    return;
+  }
   const ok = await sendMessage(String(phone).trim(), String(text));
   res.json({ ok });
 });

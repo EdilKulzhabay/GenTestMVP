@@ -70,6 +70,12 @@ export const WelcomePage: React.FC = () => {
           <p className="text-xs leading-relaxed text-slate-400">
             Вход даёт полные результаты, AI-разбор ошибок и историю тестов
           </p>
+
+          <p className="text-center text-xs text-slate-400">
+            <Link to="/admin/login" className="text-slate-500 underline hover:text-slate-700">
+              Вход для администратора
+            </Link>
+          </p>
         </div>
       </div>
     </div>

@@ -101,6 +101,11 @@ const BookSchema = new Schema<IBook>({
     trim: true,
     maxlength: 200
   },
+  contentLanguage: {
+    type: String,
+    trim: true,
+    maxlength: 80
+  },
   chapters: [ChapterSchema]
 }, { timestamps: false });
 

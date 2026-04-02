@@ -18,6 +18,12 @@ export const authApi = {
     return data.data.user;
   },
 
+  /** Вход только для роли admin; 403 если пользователь не админ */
+  async loginAdmin(payload: LoginRequest): Promise<User> {
+    const { data } = await axiosInstance.post<ApiResponse<AuthPayload>>('/auth/login/admin', payload);
+    return data.data.user;
+  },
+
   async requestOtp(phone: string): Promise<{ channel?: string; botLink?: string }> {
     const { data } = await axiosInstance.post<ApiResponse<{ channel?: string; botLink?: string }>>(
       '/auth/request-otp',

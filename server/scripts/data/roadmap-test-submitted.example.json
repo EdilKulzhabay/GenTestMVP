@@ -1,0 +1,8 @@
+{
+  "_comment": "Пример тела POST /api/v1/roadmaps/events/test-submitted (после прохождения теста). roadmapSessionId на клиенте: crypto.randomUUID(). score — процент 0..100.",
+  "subjectId": "PASTE_SUBJECT_OBJECT_ID_24_HEX",
+  "nodeId": "ent-demo-2",
+  "score": 72,
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "submittedAt": "2026-03-27T12:00:00.000Z"
+}

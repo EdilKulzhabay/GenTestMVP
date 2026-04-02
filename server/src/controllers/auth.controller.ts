@@ -41,12 +41,11 @@ class AuthController {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const expires = new Date(Date.now() + 15 * 60 * 1000);
 
-    await PendingRegistration.deleteMany({ phone: phoneTrimmed });
-    await PendingRegistration.create({
-      phone: phoneTrimmed,
-      verificationCode: code,
-      verificationCodeExpires: expires
-    });
+    await PendingRegistration.findOneAndUpdate(
+      { phone: phoneTrimmed },
+      { phone: phoneTrimmed, verificationCode: code, verificationCodeExpires: expires },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
 
     const result = await sendVerificationCodeToPhone(phoneTrimmed, code);
     const channelMsg = result.channel === 'telegram' ? 'Telegram' : result.channel === 'whatsapp' ? 'WhatsApp' : 'сообщение';
@@ -134,6 +133,25 @@ class AuthController {
     const response = this.buildAuthResponse(user);
     this.setAuthCookie(res, response.token);
     success(res, response, 'Login successful');
+  }
+
+  /** POST /auth/login/admin — только для роли admin (отдельная форма входа) */
+  async loginAdmin(req: Request, res: Response): Promise<void> {
+    const { userName, password }: ILoginDTO = req.body;
+
+    const user = await User.findOne({ userName: userName.toLowerCase() }).select('+password');
+    if (!user) throw AppError.unauthorized('Неверный логин или пароль');
+    if (user.role !== UserRole.ADMIN) {
+      throw AppError.forbidden('Доступ только для администраторов');
+    }
+    if (!user.password) throw AppError.unauthorized('Учётная запись без пароля. Создайте администратора через create-admin.');
+
+    const valid = await user.comparePassword(password);
+    if (!valid) throw AppError.unauthorized('Неверный логин или пароль');
+
+    const response = this.buildAuthResponse(user);
+    this.setAuthCookie(res, response.token);
+    success(res, response, 'Вход выполнен');
   }
 
   /** GET /auth/google/callback — callback после Google OAuth */

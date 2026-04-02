@@ -5,6 +5,8 @@
 
 import { TelegramPhoneLink } from '../models';
 
+const TELEGRAM_API_TIMEOUT_MS = Number(process.env.TELEGRAM_API_TIMEOUT_MS || 2000);
+
 function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, '');
 }
@@ -49,14 +51,18 @@ export async function sendMessage(phone: string, text: string): Promise<boolean>
 
   try {
     const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TELEGRAM_API_TIMEOUT_MS);
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: link.chatId,
         text
-      })
+      }),
+      signal: controller.signal
     });
+    clearTimeout(timeout);
     const data = (await res.json()) as { ok?: boolean; description?: string };
     if (!data.ok) {
       console.error('[Telegram] sendMessage API error:', data.description);

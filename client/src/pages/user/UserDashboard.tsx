@@ -43,9 +43,14 @@ export const UserDashboard: React.FC = () => {
           Здравствуйте, {user?.fullName}
         </h1>
         <p className="mt-1 text-sm text-slate-500">Готовы проверить знания? Запустите новый тест.</p>
-        <Link to="/user/subjects" className="mt-4 inline-block">
-          <Button>Начать тест</Button>
-        </Link>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <Link to="/user/subjects">
+            <Button>Начать тест</Button>
+          </Link>
+          <Link to="/user/roadmap">
+            <Button variant="outline">Карта знаний</Button>
+          </Link>
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -68,9 +73,10 @@ export const UserDashboard: React.FC = () => {
                 typeof item.subjectId === 'object' ? item.subjectId.title : 'Предмет';
               const pct = item.result.scorePercent;
               return (
-                <div
+                <Link
                   key={item._id}
-                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm"
+                  to={`/user/tests/${item._id}`}
+                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-slate-300 hover:shadow-md"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-slate-900">{subjectTitle}</p>
@@ -83,7 +89,7 @@ export const UserDashboard: React.FC = () => {
                   <span className={`rounded-lg px-3 py-1 text-sm font-bold ${scoreColor(pct)}`}>
                     {pct}%
                   </span>
-                </div>
+                </Link>
               );
             })}
           </div>

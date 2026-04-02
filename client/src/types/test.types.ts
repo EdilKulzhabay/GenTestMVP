@@ -1,3 +1,5 @@
+import type { RoadmapTestSubmittedResponse } from './roadmap.types';
+
 export interface TestQuestion {
   questionText: string;
   options: string[];
@@ -27,6 +29,9 @@ export interface SubmitAnswer {
 export interface SubmitTestRequest {
   testId: string;
   answers: SubmitAnswer[];
+  /** Узел roadmap + уникальный id сессии (см. roadmap API) */
+  roadmapNodeId?: string;
+  roadmapSessionId?: string;
 }
 
 export interface TestResultSummary {
@@ -38,10 +43,12 @@ export interface TestResultSummary {
 export interface TestMistake {
   question: string;
   explanation: string;
-  whereToRead: {
+  /** Источник в учебнике. Может отсутствовать — тогда показываем "что повторить" текстом */
+  whereToRead?: {
     bookTitle: string;
     chapterTitle: string;
     pages: number[];
+    topicTitle?: string;
   };
 }
 
@@ -62,6 +69,8 @@ export interface SubmitTestResponse {
     isCorrect: boolean;
     explanation?: string;
   }>;
+  /** Если в submit передали roadmapNodeId + roadmapSessionId */
+  roadmap?: RoadmapTestSubmittedResponse;
 }
 
 export interface TestHistoryItem {

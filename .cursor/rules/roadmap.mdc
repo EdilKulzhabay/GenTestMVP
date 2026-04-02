@@ -1,0 +1,85 @@
+---
+description: Roadmap-сервис (canonical/personal, прогресс, рекомендации, события теста)
+globs: "**/roadmap/**/*","**/roadmap.*","**/roadmap.ai.*","**/subjectContent.*","**/CanonicalRoadmap*","**/UserRoadmap*","**/RoadmapAttempt*"
+alwaysApply: false
+---
+
+# Контекст проекта
+Образовательное приложение: подготовка к ЕНТ через тесты. Roadmap — отдельный сервис/модуль: он НЕ «учит» контентом, а оркестрирует навигацию по знаниям и состояние прогресса.
+
+# Термины (обязательно соблюдать)
+- **Canonical roadmap** — статичная карта знаний по предмету (одна на всех): граф/дерево узлов с prerequisites и метаданными. Хранится как версионируемый артефакт (например JSON в БД или файле).
+- **Personal roadmap** — проекция canonical для пользователя: те же nodeId, плюс прогресс, доступность, рекомендации, агрегаты.
+- **Узел (node)** — минимальная единица, с которой можно стартовать тест; после теста приходит score и обновляется прогресс.
+
+Инвариант: canonical = структура/контент; personal = состояние пользователя.
+
+# ИИ-слой (реализовано в коде)
+- **Canonical из книги**: `POST /roadmaps/admin/generate-canonical` — тело как у генерации теста (`subjectId`, `bookId`, `chapterId?`, `fullBook?`). Сервер подгружает текст книги, вызывает OpenAI (`roadmap.ai.service`), валидирует граф (DAG), сохраняет `CanonicalRoadmap`. Нужен `OPENAI_API_KEY`.
+- **Ручной canonical**: `POST /roadmaps/admin/canonical` — готовый JSON узлов (без ИИ).
+- **Personal с ИИ**: `GET /roadmaps/personal?subjectId=...&ai=1` — после детерминированного снимка (locked/available, прогресс, rule-based рекомендации) опционально добавляется блок `ai`: краткий коучинг, пояснение следующего шага, `aiHint` на карточках узлов. Вход ИИ: сводка узлов + последние тесты по предмету из `User.testHistory`. ИИ **не** переопределяет математику доступности и mastery.
+
+# Бизнес-цели
+1. Быстро и стабильно отдавать структуру обучения (canonical).
+2. Для UI: locked / available / (optional — опционально в MVP), not_started / in_progress / mastered, метрики, рекомендации.
+3. После каждого успешного submit теста: обновить personal прогресс и вернуть следующий шаг (и при необходимости top-K рекомендаций).
+
+# Состояния узлов (personal-проекция)
+Минимум для MVP:
+- **availability**: `locked` | `available` (optional_available — только если явно заложите факультативные ветки).
+- **progressStatus**: `not_started` | `in_progress` | `mastered`.
+- **metrics**: attemptsCount, lastAttemptAt, bestScore, (avgScore — желательно), masteryScore ∈ [0,1].
+- **recommendation**: isRecommended, recommendedPriority (number), recommendedReason (string или код: CONTINUE_IN_PROGRESS, UNLOCKS_NEXT_TOPICS, LOW_MASTERY, PART_OF_MAIN_PATH).
+
+# Правило mastery (зафиксировать одно — MVP)
+**Rule 2**: узел `mastered`, если **bestScore ≥ threshold** (threshold = 70%). Для надёжности можно уточнить: bestScore по последним N попыткам (N=3) или глобальный best — выбери одно и документируй в коде (`server/src/roadmap/roadmap.rules.ts`).
+- Если есть попытки, но mastery не достигнут → `in_progress`.
+- Нет попыток → `not_started`.
+- После `mastered` повторные прохождения не должны откатывать прогресс назад (без деградации в MVP).
+
+# Доступность (prerequisites)
+- Canonical: у каждого узла `prerequisites: nodeId[]` — логика **AND (все должны быть mastered)**. Нулевой список → узел всегда available (с учётом выбора предмета).
+- `available` iff все prereq — `mastered`. Иначе `locked`.
+- OR-группы prerequisites — не в MVP (только all).
+
+# Рекомендации «следующий узел»
+1. Frontier: узлы `available` и (`not_started` OR `in_progress`).
+2. Приоритет: сначала `in_progress`; затем больший «разблокирующий» эффект (outDegree к ещё заблокированным); затем ниже mastery / слабее место.
+3. Ответ API: **nextRecommended** (top-1 для Resume) и **top-K** (например 3) для списка.
+
+# События, обновляющие personal roadmap
+- **Основное**: TestSessionSubmitted с userId, subjectId, nodeId, score, sessionId, submittedAt.
+- Действия: записать attempt; идемпотентно по sessionId; пересчитать метрики/mastery; при переходе в mastered — пересчитать availability соседей; пересчитать рекомендации.
+- SubjectSelected / первый заход: lazy-create personal roadmap для пары user+subject (или guest-аналог).
+- TestSessionStarted/Abandoned — опционально; в MVP `in_progress` только после хотя бы одного submit.
+
+# Хранилище (сущности)
+- **CanonicalRoadmap**: subjectId, version, nodes (nodeId, title, prerequisites[], metadata).
+- **User subject binding**: зафиксировать canonicalVersion у пользователя по предмету; при смене версии canonical — не ломать прогресс без явной миграции (MVP: freeze версии).
+- **UserNodeProgress**: userId, subjectId, canonicalVersion, nodeId, availability, progressStatus, метрики.
+- **TestAttempts/Sessions**: sessionId, userId, subjectId, nodeId, score, timestamps; для roadmap достаточно score + nodeId + sessionId.
+
+# API (минимум)
+- GET canonical: `?subjectId=` → version, nodes, prereqs/edges.
+- GET personal snapshot: `?subjectId=` → узлы с полями для UI + nextRecommended.
+- (Опционально) GET next step.
+- POST событие test-submitted ИЛИ подписка на событие из Test-сервиса → delta + nextRecommended.
+
+Идемпотентность обработки submit по sessionId обязательна.
+
+# Edge cases
+1. Падение/отмена генерации теста без submit — прогресс roadmap не менять.
+2. Дубликаты submit — не дублировать attempts (idempotency по sessionId).
+3. Смена версии canonical — не пересобирать прогресс молча; правила версионирования явно.
+4. Guest → Auth: merge прогресса по guestSessionId → userId.
+5. Конкурентные submit — транзакция или блокировка при обновлении агрегатов.
+
+# Ограничения реализации
+- Соответствовать стилю и стеку существующего репозитория (Express/Mongo/React и т.д.).
+- Не смешивать в одном ответе «обучение контентом» и roadmap: тесты и разбор остаются в текущих сервисах; roadmap получает только нужные поля после submit.
+- Любое новое правило фиксировать константами (THRESHOLD, N) и короткими комментариями в одном модуле (`server/src/roadmap/roadmap.rules.ts`).
+
+# Критерии готовности MVP
+- Можно загрузить canonical и personal для предмета.
+- После submit теста с nodeId и score пересчитываются mastery, availability и nextRecommended.
+- UI может отобразить locked/available и not_started/in_progress/mastered + одну главную рекомендацию Resume.

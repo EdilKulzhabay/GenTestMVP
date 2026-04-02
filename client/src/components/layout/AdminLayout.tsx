@@ -9,7 +9,8 @@ const navItems = [
   { to: '/admin/subjects/new', label: 'Предмет', icon: '📚' },
   { to: '/admin/books/new', label: 'Книга', icon: '📖' },
   { to: '/admin/chapters/new', label: 'Глава', icon: '📄' },
-  { to: '/admin/contents/new', label: 'Контент', icon: '✏️' }
+  { to: '/admin/contents/new', label: 'Контент', icon: '✏️' },
+  { to: '/admin/roadmaps/create', label: 'Карта знаний', icon: '🗺️' }
 ];
 
 export const AdminLayout: React.FC = () => {

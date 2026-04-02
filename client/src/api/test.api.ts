@@ -37,5 +37,10 @@ export const testApi = {
   async getMyTests(): Promise<TestHistoryItem[]> {
     const { data } = await axiosInstance.get<ApiResponse<{ total: number; tests: TestHistoryItem[] }>>('/users/me/tests');
     return data.data.tests;
+  },
+
+  async getTestDetails(testHistoryId: string): Promise<TestHistoryItem> {
+    const { data } = await axiosInstance.get<ApiResponse<TestHistoryItem>>(`/users/me/tests/${testHistoryId}`);
+    return data.data;
   }
 };

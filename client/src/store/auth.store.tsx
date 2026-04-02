@@ -42,6 +42,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (payload: LoginRequest) => Promise<User>;
+  loginAdmin: (payload: LoginRequest) => Promise<User>;
   requestOtp: (phone: string) => Promise<RequestOtpResult>;
   verifyPhone: (payload: VerifyPhoneRequest) => Promise<User>;
   logout: () => void;
@@ -89,6 +90,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return user;
   }, []);
 
+  const loginAdmin = useCallback(async (payload: LoginRequest) => {
+    const user = await authApi.loginAdmin(payload);
+    authStore.setUser(user);
+    return user;
+  }, []);
+
   const requestOtp = useCallback(async (phone: string) => {
     return authApi.requestOtp(phone);
   }, []);
@@ -110,12 +117,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isAuthenticated: Boolean(storeState.user),
       isLoading,
       login,
+      loginAdmin,
       requestOtp,
       verifyPhone,
       logout,
       refresh
     }),
-    [storeState.user, isLoading, login, requestOtp, verifyPhone, logout, refresh]
+    [storeState.user, isLoading, login, loginAdmin, requestOtp, verifyPhone, logout, refresh]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

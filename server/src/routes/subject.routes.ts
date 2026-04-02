@@ -93,7 +93,12 @@ router.post(
       .optional()
       .trim()
       .isLength({ max: 200 })
-      .withMessage('Author must be less than 200 characters')
+      .withMessage('Author must be less than 200 characters'),
+    body('contentLanguage')
+      .optional()
+      .trim()
+      .isLength({ max: 80 })
+      .withMessage('contentLanguage must be at most 80 characters')
   ],
   validate,
   asyncHandler(subjectController.addBook.bind(subjectController))

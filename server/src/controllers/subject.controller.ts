@@ -71,8 +71,13 @@ class SubjectController {
   /** POST /subjects/:id/books */
   async addBook(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.id);
-    const { title, author }: IAddBookDTO = req.body;
-    subject.books.push({ title, author, chapters: [] });
+    const { title, author, contentLanguage }: IAddBookDTO = req.body;
+    subject.books.push({
+      title,
+      author,
+      contentLanguage: contentLanguage?.trim() || undefined,
+      chapters: []
+    });
     await subject.save();
     success(res, subject, 'Book added successfully', 201);
   }

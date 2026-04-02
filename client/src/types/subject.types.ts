@@ -35,6 +35,8 @@ export interface Book {
   _id: string;
   title: string;
   author?: string;
+  /** Язык текста (для генерации тестов и roadmap) */
+  contentLanguage?: string;
   chapters: Chapter[];
 }
 

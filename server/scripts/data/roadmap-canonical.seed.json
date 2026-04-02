@@ -1,0 +1,43 @@
+{
+  "_comment": "Альтернатива ручному сиду: POST /api/v1/roadmaps/admin/generate-canonical с телом как у теста (subjectId, bookId, chapterId?) — canonical строит ИИ по тексту книги. Ручной вариант: 1) subjectId, 2) POST /api/v1/roadmaps/admin/canonical без _comment, 3) JWT админа.",
+  "subjectId": "696d59f0ffa899f0c711ad59",
+  "version": 1,
+  "nodes": [
+    {
+      "nodeId": "ent-demo-1",
+      "title": "Вводный блок: формат ЕНТ и работа с тестом",
+      "prerequisites": [],
+      "metadata": { "order": 1, "estimatedMinutes": 30 }
+    },
+    {
+      "nodeId": "ent-demo-2",
+      "title": "Базовые понятия по теме (повторение)",
+      "prerequisites": ["ent-demo-1"],
+      "metadata": { "order": 2 }
+    },
+    {
+      "nodeId": "ent-demo-3a",
+      "title": "Подтема A: задачи уровня 1",
+      "prerequisites": ["ent-demo-2"],
+      "metadata": { "branch": "A" }
+    },
+    {
+      "nodeId": "ent-demo-3b",
+      "title": "Подтема B: задачи уровня 1",
+      "prerequisites": ["ent-demo-2"],
+      "metadata": { "branch": "B" }
+    },
+    {
+      "nodeId": "ent-demo-4",
+      "title": "Смешанные задачи (нужны обе подтемы)",
+      "prerequisites": ["ent-demo-3a", "ent-demo-3b"],
+      "metadata": { "order": 5 }
+    },
+    {
+      "nodeId": "ent-demo-5",
+      "title": "Итоговый контроль по модулю",
+      "prerequisites": ["ent-demo-4"],
+      "metadata": { "order": 6, "kind": "final" }
+    }
+  ]
+}

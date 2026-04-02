@@ -50,6 +50,8 @@ export interface IBook {
   _id?: Types.ObjectId;
   title: string;
   author?: string;
+  /** Язык текста книги (для ИИ: тесты и roadmap на этом языке) */
+  contentLanguage?: string;
   chapters: IChapter[];
 }
 
@@ -79,10 +81,12 @@ export interface ITestResult {
 export interface IMistake {
   question: string;
   explanation: string;
-  whereToRead: {
+  /** Источник в учебнике. Может отсутствовать — тогда показываем "что повторить" текстом */
+  whereToRead?: {
     bookTitle: string;
     chapterTitle: string;
     pages: number[];
+    topicTitle?: string;
   };
 }
 
@@ -185,6 +189,7 @@ export interface ICreateSubjectDTO {
 export interface IAddBookDTO {
   title: string;
   author?: string;
+  contentLanguage?: string;
 }
 
 export interface IAddChapterDTO {
@@ -215,6 +220,9 @@ export interface ISubmitTestDTO {
     questionText: string;
     selectedOption: string;
   }[];
+  /** Опционально: связать сессию теста с узлом roadmap (после submit обновится прогресс) */
+  roadmapNodeId?: string;
+  roadmapSessionId?: string;
 }
 
 // ==================== AI SERVICE TYPES ====================
@@ -231,6 +239,10 @@ export interface IContentForAI {
     bookTitle: string;
     chapterTitle?: string;
     topics: string[];
+    bookAuthor?: string;
+    contentLanguage?: string;
+    /** Заголовки глав по порядку (оглавление) */
+    chapterTitles?: string[];
   };
 }
 

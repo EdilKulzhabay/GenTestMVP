@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
-import { MathText } from '../../components/MathText';
+import { ErrorBreakdown } from '../../components/ErrorBreakdown';
 import { getLastResult } from '../../utils/session';
 
 export const TestResultPage: React.FC = () => {
@@ -18,6 +18,10 @@ export const TestResultPage: React.FC = () => {
     );
   }
 
+  const pct = result.result.scorePercent;
+  const scoreColor =
+    pct >= 80 ? 'text-emerald-600' : pct >= 50 ? 'text-amber-600' : 'text-red-600';
+
   return (
     <div className="space-y-6">
       <div className="card space-y-2">
@@ -25,32 +29,16 @@ export const TestResultPage: React.FC = () => {
         <p className="text-sm text-slate-600">
           Правильных ответов: {result.result.correctAnswers} из {result.result.totalQuestions}
         </p>
-        <p className="text-lg font-semibold text-blue-600">{result.result.scorePercent}%</p>
+        <p className={`text-lg font-semibold ${scoreColor}`}>{pct}%</p>
       </div>
 
-      <div className="card space-y-3">
-        <h2 className="text-lg font-semibold text-slate-900">AI анализ</h2>
-        <p className="text-sm text-slate-600"><MathText>{result.aiFeedback.summary}</MathText></p>
-        {result.aiFeedback.mistakes.length === 0 ? (
-          <p className="text-sm text-emerald-600">Ошибок не найдено. Отлично!</p>
-        ) : (
-          <div className="space-y-3">
-            {result.aiFeedback.mistakes.map((mistake, index) => (
-              <div key={index} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm font-medium text-slate-900"><MathText>{mistake.question}</MathText></p>
-                <p className="text-sm text-slate-600"><MathText>{mistake.explanation}</MathText></p>
-                <p className="text-xs text-slate-500">
-                  Где перечитать: {mistake.whereToRead.bookTitle} • {mistake.whereToRead.chapterTitle} •
-                  стр. {mistake.whereToRead.pages.join(', ')}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
+      <div className="card space-y-4">
+        <h2 className="text-lg font-semibold text-slate-900">Разбор ошибок</h2>
+        <ErrorBreakdown mistakes={result.aiFeedback.mistakes} summary={result.aiFeedback.summary} />
       </div>
 
       <Link to="/user/subjects">
-        <Button>Новый тест</Button>
+        <Button className="w-full sm:w-auto">Новый тест</Button>
       </Link>
     </div>
   );

@@ -1,55 +1,34 @@
 import { Request, Response } from 'express';
 import { Subject, Test, User } from '../models';
-import { aiService } from '../services';
+import { aiService, roadmapService } from '../services';
+import { resolveBookContentForAI } from '../services/subjectContent.service';
 import {
   IGenerateTestDTO,
   ISubmitTestDTO,
-  IContentForAI,
   IUserAnswer,
   ITestHistory
 } from '../types';
 import { success, AppError } from '../utils';
 
 class TestController {
-  /** Собрать контент и метаданные из предмета/книги/главы */
-  private async resolveContent(dto: IGenerateTestDTO) {
-    const subject = await Subject.findById(dto.subjectId);
-    if (!subject) throw AppError.notFound('Subject not found');
-
-    const book = subject.books.find((b) => b._id?.toString() === dto.bookId);
-    if (!book) throw AppError.notFound('Book not found');
-
-    let contentText = '';
-    let chapterTitle = '';
-    const topics: string[] = [];
-
-    if (dto.fullBook || !dto.chapterId) {
-      contentText = subject.getBookContent(dto.bookId);
-      chapterTitle = 'Вся книга';
-      book.chapters.forEach((ch) => ch.topics.forEach((t) => topics.push(t.title)));
-    } else {
-      const chapter = book.chapters.find((c) => c._id?.toString() === dto.chapterId);
-      if (!chapter) throw AppError.notFound('Chapter not found');
-      contentText = subject.getChapterContent(dto.bookId, dto.chapterId!);
-      chapterTitle = chapter.title;
-      chapter.topics.forEach((t) => topics.push(t.title));
-    }
-
-    if (!contentText?.trim()) {
-      throw AppError.badRequest('No content available for test generation');
-    }
-
-    const contentForAI: IContentForAI = {
-      text: contentText,
-      metadata: {
-        subjectTitle: subject.title,
-        bookTitle: book.title,
-        chapterTitle: dto.fullBook ? undefined : chapterTitle,
-        topics
+  /** Преобразовать topicTitle из AI в topicId для сохранения в тесте */
+  private resolveTopicTitleToId(generated: { questions: any[] }, book: any): void {
+    if (!book?.chapters?.length) return;
+    const allTopics = book.chapters.flatMap((c: any) =>
+      (c.topics || []).map((t: any) => ({ ...t, _chapterId: c._id }))
+    );
+    for (const q of generated.questions || []) {
+      const topicTitle = q.relatedContent?.topicTitle;
+      if (topicTitle) {
+        const topic = allTopics.find(
+          (t: any) => t.title?.trim()?.toLowerCase() === topicTitle?.trim()?.toLowerCase()
+        );
+        if (topic) {
+          q.relatedContent = { ...q.relatedContent, topicId: topic._id };
+        }
+        delete q.relatedContent.topicTitle;
       }
-    };
-
-    return { subject, book, contentForAI };
+    }
   }
 
   /** Создать или найти кэш теста */
@@ -131,17 +110,32 @@ class TestController {
       ? book?.chapters.find((c) => c._id?.toString() === test.chapterId!.toString())
       : undefined;
 
-    const correctAnswersData = test.questions.map((q: any) => ({
-      question: q.questionText,
-      correctOption: q.correctOption,
-      explanation: q.aiExplanation
-    }));
+    const correctAnswersData = test.questions.map((q: any) => {
+      let topicTitle: string | undefined;
+      if (q.relatedContent?.topicId && book) {
+        const topic = chapter
+          ? chapter.topics.find(
+              (t: any) => t._id?.toString() === q.relatedContent.topicId?.toString()
+            )
+          : book.chapters
+              .flatMap((c: any) => c.topics)
+              .find((t: any) => t._id?.toString() === q.relatedContent.topicId?.toString());
+        topicTitle = topic?.title;
+      }
+      return {
+        question: q.questionText,
+        correctOption: q.correctOption,
+        explanation: q.aiExplanation,
+        relatedContent: { ...q.relatedContent, topicTitle }
+      };
+    });
 
+    const topics = chapter?.topics?.map((t: any) => t.title) ?? [];
     const aiFeedback = await aiService.analyzeAnswers(correctAnswersData, userAnswers, {
       subjectTitle: subject.title,
       bookTitle: book?.title || '',
       chapterTitle: chapter?.title,
-      topics: []
+      topics
     });
 
     return {
@@ -165,8 +159,9 @@ class TestController {
   /** POST /tests/generate-guest */
   async generateTestGuest(req: Request, res: Response): Promise<void> {
     const dto: IGenerateTestDTO = req.body;
-    const { contentForAI } = await this.resolveContent(dto);
+    const { contentForAI, book } = await resolveBookContentForAI(dto);
     const generated = await aiService.generateTest(contentForAI, []);
+    this.resolveTopicTitleToId(generated, book);
     const test = await this.findOrCreateTest(dto, generated);
     success(res, this.sanitize(test), 'Test generated successfully', 201);
   }
@@ -186,19 +181,20 @@ class TestController {
   async generateTest(req: Request, res: Response): Promise<void> {
     const dto: IGenerateTestDTO = req.body;
     const userId = (req as any).user?.userId;
-    const { contentForAI } = await this.resolveContent(dto);
+    const { contentForAI, book } = await resolveBookContentForAI(dto);
 
     const user = await User.findById(userId);
     const previousQuestions = user?.getAllQuestionHashes(dto.subjectId, dto.bookId) || [];
 
     const generated = await aiService.generateTest(contentForAI, previousQuestions);
+    this.resolveTopicTitleToId(generated, book);
     const test = await this.findOrCreateTest(dto, generated);
     success(res, this.sanitize(test), 'Test generated successfully', 201);
   }
 
   /** POST /tests/submit (auth) */
   async submitTest(req: Request, res: Response): Promise<void> {
-    const { testId, answers }: ISubmitTestDTO = req.body;
+    const { testId, answers, roadmapNodeId, roadmapSessionId }: ISubmitTestDTO = req.body;
     const userId = (req as any).user?.userId;
 
     const test = await Test.findById(testId);
@@ -219,7 +215,24 @@ class TestController {
     };
 
     await User.findByIdAndUpdate(userId, { $push: { testHistory } }, { new: true });
-    success(res, detailed, 'Test submitted successfully');
+
+    let roadmap: Awaited<ReturnType<typeof roadmapService.recordTestSubmitted>> | undefined;
+    if (roadmapNodeId?.trim() && roadmapSessionId?.trim()) {
+      try {
+        roadmap = await roadmapService.recordTestSubmitted({
+          userId,
+          subjectId: test.subjectId.toString(),
+          nodeId: roadmapNodeId.trim(),
+          scorePercent: resultSummary.scorePercent,
+          sessionId: roadmapSessionId.trim(),
+          submittedAt: new Date()
+        });
+      } catch (err) {
+        console.warn('[roadmap] submit hook skipped:', err);
+      }
+    }
+
+    success(res, roadmap ? { ...detailed, roadmap } : detailed, 'Test submitted successfully');
   }
 
   /** POST /tests/claim-guest — привязать гостевой тест к авторизованному пользователю */

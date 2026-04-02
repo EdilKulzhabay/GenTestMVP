@@ -14,9 +14,16 @@ axiosInstance.interceptors.response.use(
     if (error?.response?.status === 401) {
       authStore.logout();
       const path = window.location.pathname;
-      if (!path.startsWith('/welcome') && !path.startsWith('/login')) {
+      if (
+        !path.startsWith('/welcome') &&
+        !path.startsWith('/login') &&
+        !path.startsWith('/admin/login')
+      ) {
         const returnUrl = encodeURIComponent(path + window.location.search);
-        window.location.assign(`/welcome?returnUrl=${returnUrl}`);
+        const isAdminPath = path.startsWith('/admin');
+        window.location.assign(
+          isAdminPath ? `/admin/login?returnUrl=${returnUrl}` : `/welcome?returnUrl=${returnUrl}`
+        );
       }
     }
     return Promise.reject(error);

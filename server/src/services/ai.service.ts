@@ -49,19 +49,28 @@ class AIService {
     }
 
     const sourceContentHash = this.hashContent(content.text);
+    const topicsList = content.metadata.topics?.length
+      ? `- relatedContent.topicTitle — точное название темы из списка: [${content.metadata.topics.join(', ')}]. Если вопрос не привязан к конкретной теме, опусти topicTitle.`
+      : '';
+
+    const languageRule = content.metadata.contentLanguage?.trim()
+      ? `- Язык полей questionText, options, correctOption, aiExplanation и topicTitle: ${content.metadata.contentLanguage.trim()}. Не смешивай с другим языком.`
+      : '- Язык вопросов, вариантов ответов и пояснений должен совпадать с языком приведённого учебного текста (например текст на казахском — весь вывод на казахском; на русском — на русском; на английском — на английском).';
+
     const prompt = [
       'Ты — ассистент преподавателя. Сгенерируй ровно 10 вопросов для теста.',
       'Формат ответа: строгий JSON без Markdown.',
       'Структура:',
       '{ "questions": [',
-      '  { "questionText": "...", "options": ["...","...","...","..."], "correctOption": "...", "aiExplanation": "...", "relatedContent": { "pages": [1,2] } }',
+      '  { "questionText": "...", "options": ["...","...","...","..."], "correctOption": "...", "aiExplanation": "...", "relatedContent": { "pages": [1,2], "topicTitle": "..." } }',
       '] }',
       'Требования:',
-      '- Вопросы на русском.',
+      languageRule,
       '- 4 варианта ответа.',
       '- correctOption должен быть одним из options.',
       '- aiExplanation краткое (1-2 предложения).',
       '- relatedContent.pages — массив номеров страниц (можно приблизительно).',
+      topicsList,
       '- Если в контенте есть формулы LaTeX ($...$ или $$...$$), сохраняй их в questionText, options и aiExplanation.',
       _previousQuestions.length > 0 ? `- Избегай этих вопросов: ${_previousQuestions.join(' | ')}` : '',
       'Контент:',
@@ -165,7 +174,12 @@ class AIService {
    *  Be encouraging but point out areas for improvement."
    */
   async analyzeAnswers(
-    correctAnswers: Array<{ question: string; correctOption: string; explanation: string }>,
+    correctAnswers: Array<{
+      question: string;
+      correctOption: string;
+      explanation: string;
+      relatedContent?: { pages?: number[]; topicTitle?: string };
+    }>,
     userAnswers: IUserAnswer[],
     contentMetadata: IContentForAI['metadata']
   ): Promise<IAIFeedback> {
@@ -185,15 +199,21 @@ class AIService {
       const correctAnswer = correctAnswers[i];
 
       if (!userAnswer.isCorrect) {
-        mistakes.push({
+        const mistake: IMistake = {
           question: userAnswer.question,
-          explanation: `Вы выбрали "${userAnswer.selectedOption}", но правильный ответ: "${correctAnswer.correctOption}". ${correctAnswer.explanation}`,
-          whereToRead: {
+          explanation: `Вы выбрали "${userAnswer.selectedOption}", но правильный ответ: "${correctAnswer.correctOption}". ${correctAnswer.explanation}`
+        };
+        if (contentMetadata.bookTitle?.trim()) {
+          const rcPages = correctAnswer.relatedContent?.pages;
+          const pages = rcPages && rcPages.length > 0 ? rcPages : [1];
+          mistake.whereToRead = {
             bookTitle: contentMetadata.bookTitle,
             chapterTitle: contentMetadata.chapterTitle || 'Вся книга',
-            pages: [Math.floor(Math.random() * 100) + 1] // Mock страницы
-          }
-        });
+            pages,
+            topicTitle: correctAnswer.relatedContent?.topicTitle
+          };
+        }
+        mistakes.push(mistake);
       }
     }
 

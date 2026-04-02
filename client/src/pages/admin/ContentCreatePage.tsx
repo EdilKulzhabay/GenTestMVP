@@ -10,7 +10,7 @@ import { Button } from '../../components/ui/Button';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
 import { SuccessMessage } from '../../components/ui/SuccessMessage';
 import { Loader } from '../../components/ui/Loader';
-import { MathText } from '../../components/MathText';
+import { MarkdownMathText } from '../../components/MarkdownMathText';
 import { getApiErrorMessage } from '../../utils/error';
 
 const schema = z
@@ -177,32 +177,32 @@ export const ContentCreatePage: React.FC = () => {
           <Input label="Порядок параграфа" type="number" placeholder="0" error={errors.paragraphOrder?.message} {...register('paragraphOrder')} />
 
           <label className="flex w-full flex-col gap-2 text-sm font-medium text-slate-700">
-            <span>Текст параграфа</span>
+            <span>Текст параграфа (Markdown + формулы)</span>
             <textarea
               className={`w-full rounded-lg border px-3 py-2 text-sm text-slate-900 focus:outline-none font-mono ${
                 errors.contentText ? 'border-red-400 focus:border-red-500' : 'border-slate-200 focus:border-blue-500'
               }`}
-              rows={8}
-              placeholder="Вставьте учебный текст. Формулы: $E=mc^2$ (inline) или $$\frac{a}{b}$$ (блок)"
+              rows={10}
+              placeholder="Заголовки ##, списки, **жирный**. Формулы: $E=mc^2$ или $$\\frac{a}{b}$$"
               {...register('contentText')}
             />
             {contentPreview && (
               <details className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
-                <summary className="cursor-pointer font-medium text-slate-700">Предпросмотр с формулами</summary>
-                <div className="mt-2 rounded border border-slate-200 bg-white p-3 text-sm text-slate-800">
-                  <MathText>{contentPreview}</MathText>
+                <summary className="cursor-pointer font-medium text-slate-700">Предпросмотр (Markdown и LaTeX)</summary>
+                <div className="mt-2 max-h-80 overflow-y-auto rounded border border-slate-200 bg-white p-3 text-sm text-slate-800">
+                  <MarkdownMathText>{contentPreview}</MarkdownMathText>
                 </div>
               </details>
             )}
             <details className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-              <summary className="cursor-pointer font-medium text-slate-700">Формулы (LaTeX)</summary>
+              <summary className="cursor-pointer font-medium text-slate-700">Подсказка по разметке</summary>
               <ul className="mt-2 space-y-1">
-                <li><code className="rounded bg-slate-200 px-1">{'$x^2$'}</code> — степень</li>
-                <li><code className="rounded bg-slate-200 px-1">{'$\\frac{a}{b}$'}</code> — дробь</li>
-                <li><code className="rounded bg-slate-200 px-1">{'$\\sqrt{x}$'}</code> — корень</li>
-                <li><code className="rounded bg-slate-200 px-1">{'$\\sum_{i=1}^n$'}</code> — сумма</li>
-                <li><code className="rounded bg-slate-200 px-1">{'$$\\int_0^1 f(x)dx$$'}</code> — интеграл (блок)</li>
-                <li><code className="rounded bg-slate-200 px-1">{'\\(...\\)'}</code> и <code className="rounded bg-slate-200 px-1">{'\\[...\\]'}</code> — альтернативный синтаксис</li>
+                <li>
+                  <code className="rounded bg-slate-200 px-1">## Заголовок</code>, <code className="rounded bg-slate-200 px-1">**важно**</code>, списки <code className="rounded bg-slate-200 px-1">- пункт</code>
+                </li>
+                <li><code className="rounded bg-slate-200 px-1">{'$x^2$'}</code> — формула в строке</li>
+                <li><code className="rounded bg-slate-200 px-1">{'$$\\frac{a}{b}$$'}</code> — формула блоком (физика, химия)</li>
+                <li><code className="rounded bg-slate-200 px-1">{'\\(...\\)'}</code> и <code className="rounded bg-slate-200 px-1">{'\\[...\\]'}</code> — тот же LaTeX, другой синтаксис</li>
               </ul>
             </details>
             {errors.contentText && <span className="text-xs text-red-600">{errors.contentText.message}</span>}

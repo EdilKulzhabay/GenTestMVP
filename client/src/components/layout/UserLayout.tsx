@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 
 const navItems = [
   { to: '/user', label: 'Дашборд', end: true },
+  { to: '/user/roadmap', label: 'Карта знаний' },
   { to: '/user/subjects', label: 'Начать тест' }
 ];
 

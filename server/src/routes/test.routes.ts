@@ -135,7 +135,9 @@ router.post(
     body('answers.*.selectedOption')
       .trim()
       .notEmpty()
-      .withMessage('Each answer must have a selected option')
+      .withMessage('Each answer must have a selected option'),
+    body('roadmapNodeId').optional().trim(),
+    body('roadmapSessionId').optional().trim()
   ],
   validate,
   asyncHandler(testController.submitTest.bind(testController))

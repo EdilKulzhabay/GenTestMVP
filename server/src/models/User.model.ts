@@ -61,18 +61,13 @@ const TestResultSchema = new Schema<ITestResult>({
 }, { _id: false });
 
 const MistakeSchema = new Schema<IMistake>({
-  question: { 
-    type: String, 
-    required: true 
-  },
-  explanation: { 
-    type: String, 
-    required: true 
-  },
+  question: { type: String, required: true },
+  explanation: { type: String, required: true },
   whereToRead: {
-    bookTitle: { type: String, required: true },
-    chapterTitle: { type: String, required: true },
-    pages: [{ type: Number, required: true }]
+    bookTitle: { type: String },
+    chapterTitle: { type: String },
+    pages: [{ type: Number }],
+    topicTitle: { type: String }
   }
 }, { _id: false });
 

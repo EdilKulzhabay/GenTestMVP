@@ -65,6 +65,24 @@ router.post(
 );
 
 /**
+ * POST /auth/login/admin — только администраторы (отдельная форма)
+ */
+router.post(
+  '/login/admin',
+  [
+    body('userName')
+      .trim()
+      .notEmpty()
+      .withMessage('Username is required'),
+    body('password')
+      .notEmpty()
+      .withMessage('Password is required')
+  ],
+  validate,
+  asyncHandler(authController.loginAdmin.bind(authController))
+);
+
+/**
  * POST /auth/login
  */
 router.post(

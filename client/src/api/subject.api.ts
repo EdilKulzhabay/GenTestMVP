@@ -23,7 +23,10 @@ export const subjectApi = {
     return data.data;
   },
 
-  async createBook(subjectId: string, payload: { title: string; author?: string }): Promise<Subject> {
+  async createBook(
+    subjectId: string,
+    payload: { title: string; author?: string; contentLanguage?: string }
+  ): Promise<Subject> {
     const { data } = await axiosInstance.post<ApiResponse<Subject>>(`/subjects/${subjectId}/books`, payload);
     return data.data;
   },

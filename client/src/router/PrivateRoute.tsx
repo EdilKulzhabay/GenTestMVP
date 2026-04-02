@@ -17,17 +17,27 @@ export const PrivateRoute: React.FC<PrivateRouteProps> = ({ roles }) => {
   }
 
   if (!isAuthenticated) {
+    const returnPath = location.pathname + location.search;
+    const adminOnly = roles?.length === 1 && roles[0] === 'admin';
+    if (adminOnly) {
+      return (
+        <Navigate
+          to={`/admin/login?returnUrl=${encodeURIComponent(returnPath)}`}
+          replace
+        />
+      );
+    }
     return (
       <Navigate
         to="/welcome"
         replace
-        state={{ returnUrl: location.pathname + location.search }}
+        state={{ returnUrl: returnPath }}
       />
     );
   }
 
   if (roles && user && !roles.includes(user.role)) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={user.role === 'admin' ? '/admin' : '/user'} replace />;
   }
 
   return <Outlet />;

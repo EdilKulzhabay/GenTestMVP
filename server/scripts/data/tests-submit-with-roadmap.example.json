@@ -1,0 +1,12 @@
+{
+  "_comment": "Пример расширения POST /api/v1/tests/submit: к обычным testId и answers добавьте roadmapNodeId и roadmapSessionId (один sessionId на попытку, сгенерировать до старта теста).",
+  "testId": "PASTE_TEST_OBJECT_ID",
+  "answers": [
+    {
+      "questionText": "Текст вопроса как в сгенерированном тесте",
+      "selectedOption": "Выбранный вариант"
+    }
+  ],
+  "roadmapNodeId": "ent-demo-2",
+  "roadmapSessionId": "550e8400-e29b-41d4-a716-446655440001"
+}

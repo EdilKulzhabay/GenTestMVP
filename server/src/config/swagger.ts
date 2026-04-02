@@ -187,6 +187,7 @@ const swaggerSpec = {
           _id: { type: 'string' },
           title: { type: 'string', maxLength: 300 },
           author: { type: 'string', maxLength: 200 },
+          contentLanguage: { type: 'string', maxLength: 80, description: 'Язык текста книги (для ИИ)' },
           chapters: { type: 'array', items: { $ref: '#/components/schemas/Chapter' } }
         }
       },
@@ -357,7 +358,8 @@ const swaggerSpec = {
                           properties: {
                             bookTitle: { type: 'string' },
                             chapterTitle: { type: 'string' },
-                            pages: { type: 'array', items: { type: 'number' } }
+                            pages: { type: 'array', items: { type: 'number' } },
+                            topicTitle: { type: 'string', description: 'Название темы/параграфа' }
                           }
                         }
                       }
@@ -605,7 +607,19 @@ const swaggerSpec = {
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'ObjectId предмета' }],
         requestBody: {
           required: true,
-          content: { 'application/json': { schema: { type: 'object', required: ['title'], properties: { title: { type: 'string', maxLength: 300 }, author: { type: 'string', maxLength: 200 } } } } }
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['title'],
+                properties: {
+                  title: { type: 'string', maxLength: 300 },
+                  author: { type: 'string', maxLength: 200 },
+                  contentLanguage: { type: 'string', maxLength: 80 }
+                }
+              }
+            }
+          }
         },
         responses: {
           201: { description: 'Книга добавлена' },

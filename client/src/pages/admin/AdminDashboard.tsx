@@ -184,7 +184,7 @@ export const AdminDashboard: React.FC = () => {
                   <span>{chapterCount} {chapterCount === 1 ? 'глава' : 'глав'}</span>
                 </div>
 
-                <div className="mt-4 flex gap-2">
+                <div className="mt-4 flex flex-wrap gap-2">
                   <Link
                     to="/admin/books/new"
                     state={{ subjectId: subject._id }}
@@ -198,6 +198,12 @@ export const AdminDashboard: React.FC = () => {
                     className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
                   >
                     + Контент
+                  </Link>
+                  <Link
+                    to={`/admin/roadmaps/${subject._id}`}
+                    className="rounded-lg border border-violet-200 bg-violet-50/80 px-3 py-1.5 text-xs font-medium text-violet-800 transition hover:bg-violet-100"
+                  >
+                    Карта знаний
                   </Link>
                 </div>
               </div>
