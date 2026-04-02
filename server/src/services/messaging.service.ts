@@ -20,10 +20,10 @@ export type SendResult = {
 const OTP_TEXT = (code: string) =>
   `Ваш код подтверждения Edu AI: ${code}\n\nКод действителен 15 минут.`;
 
-const HARD_TIMEOUT_MS = 4000;
-const WA_HEALTH_TIMEOUT_MS = 1500;
-const WA_SEND_TIMEOUT_MS = 2500;
-const TG_SEND_TIMEOUT_MS = 2500;
+const HARD_TIMEOUT_MS = 15000;
+const WA_HEALTH_TIMEOUT_MS = 3000;
+const WA_SEND_TIMEOUT_MS = 13000;
+const TG_SEND_TIMEOUT_MS = 5000;
 
 // ─── Circuit Breaker для WhatsApp ───
 const CB_FAIL_THRESHOLD = 2;

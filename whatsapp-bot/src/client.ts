@@ -14,7 +14,8 @@ let isReinitializing = false;
 let consecutiveErrors = 0;
 let lastErrorAt = 0;
 
-const SEND_TIMEOUT_MS = Number(process.env.WHATSAPP_SEND_TIMEOUT_MS || 6000);
+const SEND_TIMEOUT_MS = Number(process.env.WHATSAPP_SEND_TIMEOUT_MS || 12000);
+const PROTOCOL_TIMEOUT_MS = Number(process.env.WHATSAPP_PROTOCOL_TIMEOUT_MS || 60000);
 const REINIT_COOLDOWN_MS = 30_000;
 
 const DEFAULT_CHROME_PATHS = [
@@ -68,6 +69,7 @@ function initClient(): Promise<void> {
       puppeteer: {
         headless: true,
         executablePath: chromePath,
+        protocolTimeout: PROTOCOL_TIMEOUT_MS,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',

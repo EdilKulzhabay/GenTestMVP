@@ -98,15 +98,52 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'telegram-bot' });
 });
 
+app.get('/webhook-info', async (_req, res) => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    res.json({ ok: false, error: 'TELEGRAM_BOT_TOKEN не задан' });
+    return;
+  }
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`);
+    const data = await r.json();
+    res.json(data);
+  } catch (err) {
+    res.json({ ok: false, error: String(err) });
+  }
+});
+
 const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/edu-ai-test-platform';
 
 mongoose.connect(mongoURI).then(() => {
   console.log('✅ MongoDB подключена');
-  app.listen(PORT, () => {
+  app.listen(PORT, async () => {
     console.log('🚀 Telegram Bot (webhook) запущен');
     console.log(`   Порт: ${PORT}`);
     console.log(`   Webhook: POST http://localhost:${PORT}${WEBHOOK_PATH}`);
     console.log(`   Настройка: npm run webhook -- <BASE_URL>`);
+
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (token) {
+      try {
+        const r = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`);
+        const info = (await r.json()) as { result?: { url?: string; last_error_message?: string; last_error_date?: number; pending_update_count?: number } };
+        const wh = info.result;
+        if (wh) {
+          console.log(`[Telegram] Текущий webhook URL: ${wh.url || '(не установлен)'}`);
+          if (wh.last_error_message) console.warn(`[Telegram] Последняя ошибка webhook: ${wh.last_error_message}`);
+          if (wh.pending_update_count) console.log(`[Telegram] Ожидающие обновления: ${wh.pending_update_count}`);
+          if (!wh.url) {
+            console.warn('[Telegram] ⚠️  Webhook НЕ установлен! Бот не будет получать обновления.');
+            console.warn('[Telegram] Установите: npm run webhook -- https://your-domain.com');
+          }
+        }
+      } catch (err) {
+        console.error('[Telegram] Не удалось проверить webhook:', err);
+      }
+    } else {
+      console.warn('[Telegram] ⚠️  TELEGRAM_BOT_TOKEN не задан!');
+    }
   });
 }).catch((err) => {
   console.error('❌ MongoDB:', err);
