@@ -5,12 +5,19 @@ import { generateToken, success, AppError } from '../utils';
 import { sendVerificationCodeToPhone } from '../services/messaging.service';
 
 class AuthController {
-  private setAuthCookie(res: Response, token: string): void {
-    const isProduction = process.env.NODE_ENV === 'production';
+  private setAuthCookie(req: Request, res: Response, token: string): void {
+    const origin = req.headers.origin || '';
+    const host = req.get('host') || '';
+    const isCrossOrigin = !!origin && !origin.includes(host);
+
+    const secure = req.secure
+      || req.headers['x-forwarded-proto'] === 'https'
+      || process.env.NODE_ENV === 'production';
+
     res.cookie('token', token, {
       httpOnly: true,
-      sameSite: 'lax',
-      secure: isProduction,
+      sameSite: isCrossOrigin ? 'none' : 'lax',
+      secure: isCrossOrigin ? true : secure,
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
   }
@@ -74,7 +81,7 @@ class AuthController {
     if (user) {
       await PendingRegistration.deleteOne({ _id: pending._id });
       const response = this.buildAuthResponse(user);
-      this.setAuthCookie(res, response.token);
+      this.setAuthCookie(req, res, response.token);
       success(res, response, 'Вход выполнен');
       return;
     }
@@ -115,7 +122,7 @@ class AuthController {
 
     await PendingRegistration.deleteOne({ _id: pending._id });
     const response = this.buildAuthResponse(user);
-    this.setAuthCookie(res, response.token);
+    this.setAuthCookie(req, res, response.token);
     success(res, response, 'Вход выполнен', 201);
   }
 
@@ -131,7 +138,7 @@ class AuthController {
     if (!valid) throw AppError.unauthorized('Invalid credentials');
 
     const response = this.buildAuthResponse(user);
-    this.setAuthCookie(res, response.token);
+    this.setAuthCookie(req, res, response.token);
     success(res, response, 'Login successful');
   }
 
@@ -150,7 +157,7 @@ class AuthController {
     if (!valid) throw AppError.unauthorized('Неверный логин или пароль');
 
     const response = this.buildAuthResponse(user);
-    this.setAuthCookie(res, response.token);
+    this.setAuthCookie(req, res, response.token);
     success(res, response, 'Вход выполнен');
   }
 
@@ -160,7 +167,7 @@ class AuthController {
     if (!user) throw AppError.unauthorized('Google authentication failed');
 
     const response = this.buildAuthResponse(user);
-    this.setAuthCookie(res, response.token);
+    this.setAuthCookie(req, res, response.token);
 
     const frontendUrl = (req as any)._oauthFrontendOrigin
       || process.env.FRONTEND_URL
@@ -190,7 +197,7 @@ class AuthController {
     });
 
     const response = this.buildAuthResponse(user);
-    this.setAuthCookie(res, response.token);
+    this.setAuthCookie(req, res, response.token);
     success(res, response, 'Admin created successfully', 201);
   }
 
