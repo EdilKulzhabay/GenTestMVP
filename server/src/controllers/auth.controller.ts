@@ -6,18 +6,19 @@ import { sendVerificationCodeToPhone } from '../services/messaging.service';
 
 class AuthController {
   private setAuthCookie(req: Request, res: Response, token: string): void {
-    const origin = req.headers.origin || '';
     const host = req.get('host') || '';
+    const origin = req.headers.origin || (req as any)._oauthFrontendOrigin || '';
     const isCrossOrigin = !!origin && !origin.includes(host);
 
-    const secure = req.secure
+    const secure = isCrossOrigin
+      || req.secure
       || req.headers['x-forwarded-proto'] === 'https'
       || process.env.NODE_ENV === 'production';
 
     res.cookie('token', token, {
       httpOnly: true,
       sameSite: isCrossOrigin ? 'none' : 'lax',
-      secure: isCrossOrigin ? true : secure,
+      secure,
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
   }
