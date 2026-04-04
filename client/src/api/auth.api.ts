@@ -43,7 +43,9 @@ export const authApi = {
   },
 
   getGoogleAuthUrl(): string {
-    return `${getApiBase()}/auth/google`;
+    const base = getApiBase();
+    const redirectOrigin = encodeURIComponent(window.location.origin);
+    return `${base}/auth/google?redirect_origin=${redirectOrigin}`;
   },
 
   async getMe(): Promise<User> {

@@ -1,10 +1,21 @@
-import { Router } from 'express';
+import { Router, Request } from 'express';
 import passport from 'passport';
 import { body } from 'express-validator';
 import { authController } from '../controllers';
 import { authenticate, asyncHandler, validate } from '../middlewares';
+import { API_BASE_PATH } from '../config/constants';
 
 const router = Router();
+
+function getRequestOrigin(req: Request): string {
+  const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim()
+    || req.protocol
+    || 'https';
+  const host = (req.headers['x-forwarded-host'] as string)?.split(',')[0]?.trim()
+    || req.get('host')
+    || 'localhost';
+  return `${proto}://${host}`;
+}
 
 /**
  * POST /auth/request-otp — отправка кода на телефон (WhatsApp → Telegram)
@@ -102,6 +113,10 @@ router.post(
 
 /**
  * GET /auth/google — Google OAuth (если настроен)
+ *
+ * ?redirect_origin=http://localhost:5173  — клиент передаёт свой origin,
+ * чтобы после авторизации редирект шёл именно туда (а не на хост сервера).
+ * callbackURL для Google всегда строится по хосту сервера.
  */
 router.get(
   '/google',
@@ -110,7 +125,17 @@ router.get(
       res.status(501).json({ success: false, message: 'Google OAuth not configured' });
       return;
     }
-    return passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
+    const serverOrigin = getRequestOrigin(req);
+    const callbackURL = `${serverOrigin}${API_BASE_PATH}/auth/google/callback`;
+
+    const frontendOrigin = (req.query.redirect_origin as string) || serverOrigin;
+    const state = Buffer.from(JSON.stringify({ frontendOrigin })).toString('base64url');
+
+    return (passport.authenticate as Function)('google', {
+      scope: ['profile', 'email'],
+      callbackURL,
+      state
+    })(req, res, next);
   }
 );
 
@@ -120,15 +145,25 @@ router.get(
 router.get(
   '/google/callback',
   (req, res, next) => {
-    passport.authenticate('google', { session: false }, (err: Error, user: any) => {
+    let frontendOrigin = process.env.FRONTEND_URL || 'http://localhost:5173';
+    try {
+      const stateRaw = req.query.state as string;
+      if (stateRaw) {
+        const parsed = JSON.parse(Buffer.from(stateRaw, 'base64url').toString());
+        if (parsed.frontendOrigin) frontendOrigin = parsed.frontendOrigin;
+      }
+    } catch { /* fallback to FRONTEND_URL */ }
+
+    const callbackURL = `${getRequestOrigin(req)}${API_BASE_PATH}/auth/google/callback`;
+
+    (passport.authenticate as Function)('google', { session: false, callbackURL }, (err: Error, user: any) => {
       if (err) return next(err);
       if (!user) {
-        res.redirect(
-          `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=google_auth_failed`
-        );
+        res.redirect(`${frontendOrigin}/login?error=google_auth_failed`);
         return;
       }
       (req as any).user = user;
+      (req as any)._oauthFrontendOrigin = frontendOrigin;
       authController.googleCallback(req, res);
     })(req, res, next);
   }

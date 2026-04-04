@@ -162,12 +162,14 @@ class AuthController {
     const response = this.buildAuthResponse(user);
     this.setAuthCookie(res, response.token);
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const redirectUrl = `${frontendUrl}/user`;
+    const frontendUrl = (req as any)._oauthFrontendOrigin
+      || process.env.FRONTEND_URL
+      || 'http://localhost:5173';
+
     if (user.role === UserRole.ADMIN) {
       res.redirect(`${frontendUrl}/admin`);
     } else {
-      res.redirect(redirectUrl);
+      res.redirect(`${frontendUrl}/user`);
     }
   }
 

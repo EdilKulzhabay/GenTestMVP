@@ -1,7 +1,7 @@
 {
   "name": "gentest-whatsapp-bot",
   "version": "1.0.0",
-  "description": "WhatsApp Web клиент для отправки OTP (GenTest MVP)",
+  "description": "WhatsApp Web клиент для отправки OTP (Edu AI)",
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node src/index.ts",

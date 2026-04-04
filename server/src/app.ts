@@ -73,15 +73,6 @@ app.get(`${API_BASE_PATH}/debug`, (req, res) => {
   }, 'API reachable');
 });
 
-// Google OAuth — прямой маршрут (на случай проблем с вложенным роутером)
-app.get(`${API_BASE_PATH}/auth/google`, (req, res, next) => {
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-    res.status(501).json({ success: false, message: 'Google OAuth not configured' });
-    return;
-  }
-  return passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
-});
-
 // API routes
 app.use(API_BASE_PATH, routes);
 

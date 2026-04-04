@@ -142,17 +142,17 @@ async function sendOtpInternal(phone: string, code: string): Promise<SendResult>
     type Chan = 'whatsapp' | 'telegram';
     const first = await new Promise<Chan | null>((resolve) => {
       let settled = false;
-      const guard = setTimeout(() => done(null), Math.max(WA_SEND_TIMEOUT_MS, TG_SEND_TIMEOUT_MS) + 200);
+      let doneCount = 0;
 
       const done = (ch: Chan | null) => {
         if (settled) return;
-        settled = true;
-        clearTimeout(guard);
-        resolve(ch);
+        if (ch) { settled = true; resolve(ch); return; }
+        doneCount++;
+        if (doneCount >= 2) { settled = true; resolve(null); }
       };
 
-      sendViaWhatsApp(trimmed, code).then((ok) => { if (ok) done('whatsapp'); });
-      sendViaTelegram(trimmed, code).then((ok) => { if (ok) done('telegram'); });
+      sendViaWhatsApp(trimmed, code).then((ok) => done(ok ? 'whatsapp' : null));
+      sendViaTelegram(trimmed, code).then((ok) => done(ok ? 'telegram' : null));
     });
 
     if (first) {

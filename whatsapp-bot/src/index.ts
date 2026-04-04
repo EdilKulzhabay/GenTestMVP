@@ -43,10 +43,12 @@ app.post('/send', checkAuth, async (req: Request, res: Response) => {
 });
 
 app.get('/health', (_req: Request, res: Response) => {
+  const ready = isClientReady();
   res.json({
     ok: true,
-    ready: isClientReady(),
-    service: 'whatsapp-bot'
+    ready,
+    service: 'whatsapp-bot',
+    uptime: Math.floor(process.uptime())
   });
 });
 

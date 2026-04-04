@@ -1,4 +1,4 @@
-# Telegram Bot (GenTest MVP)
+# Telegram Bot (Edu AI)
 
 Отдельный сервис для OTP: webhook и привязка номера к chat_id.
 

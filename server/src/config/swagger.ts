@@ -3,7 +3,7 @@ import { API_BASE_PATH } from './constants';
 const swaggerSpec = {
   openapi: '3.0.0',
   info: {
-    title: 'GenTest API',
+    title: 'Edu AI API',
     version: '1.0.0',
     description: `API платформы для AI-генерации тестов по учебному контенту.
 
@@ -12,7 +12,7 @@ const swaggerSpec = {
 **Структура контента:** Subject → Book → Chapter → Topic → Paragraph.
 
 **Базовый путь:** \`${API_BASE_PATH}\``,
-    contact: { name: 'GenTest', url: 'https://kakoi-to-do-men.ru' }
+    contact: { name: 'Edu AI', url: 'https://kakoi-to-do-men.ru' }
   },
   servers: [
     { url: `https://kakoi-to-do-men.ru${API_BASE_PATH}`, description: 'Production' },

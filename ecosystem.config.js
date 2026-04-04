@@ -1,5 +1,5 @@
 /**
- * PM2 Ecosystem — все сервисы GenTest MVP
+ * PM2 Ecosystem — все сервисы Edu AI
  * Запуск из корня: pm2 start ecosystem.config.js
  */
 
