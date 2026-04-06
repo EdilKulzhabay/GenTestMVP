@@ -16,6 +16,7 @@ import { ContentCreatePage } from '../pages/admin/ContentCreatePage';
 import { SubjectImportPage } from '../pages/admin/SubjectImportPage';
 import { RoadmapCanonicalCreatePage } from '../pages/admin/RoadmapCanonicalCreatePage';
 import { RoadmapCanonicalViewPage } from '../pages/admin/RoadmapCanonicalViewPage';
+import { SubjectDetailPage } from '../pages/admin/SubjectDetailPage';
 import { UserDashboard } from '../pages/user/UserDashboard';
 import { SubjectSelectPage } from '../pages/user/SubjectSelectPage';
 import { BookSelectPage } from '../pages/user/BookSelectPage';
@@ -82,6 +83,7 @@ export const router = createBrowserRouter([
         element: <AdminLayout />,
         children: [
           { path: '/admin', element: <AdminDashboard /> },
+          { path: '/admin/subjects/:subjectId', element: <SubjectDetailPage /> },
           { path: '/admin/subjects/import', element: <SubjectImportPage /> },
           { path: '/admin/subjects/new', element: <SubjectCreatePage /> },
           { path: '/admin/books/new', element: <BookCreatePage /> },

@@ -1,12 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { testApi } from '../../api/test.api';
+import { roadmapApi } from '../../api/roadmap.api';
+import { subjectApi } from '../../api/subject.api';
 import { TestHistoryItem } from '../../types/test.types';
+import { PersonalRoadmapResponse } from '../../types/roadmap.types';
+import { Subject } from '../../types/subject.types';
 import { Loader } from '../../components/ui/Loader';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
 import { Button } from '../../components/ui/Button';
 import { getApiErrorMessage } from '../../utils/error';
 import { useAuth } from '../../store/auth.store';
+import { saveRoadmapContext } from '../../utils/session';
 
 function scoreColor(pct: number): string {
   if (pct >= 80) return 'text-emerald-600 bg-emerald-50';
@@ -14,19 +19,71 @@ function scoreColor(pct: number): string {
   return 'text-red-600 bg-red-50';
 }
 
+interface ContinueLearningData {
+  subjectId: string;
+  subjectTitle: string;
+  nextNodeId: string;
+  nextNodeTitle: string;
+  nextNodeReason: string;
+  totalNodes: number;
+  masteredNodes: number;
+  bookId?: string;
+}
+
 export const UserDashboard: React.FC = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [history, setHistory] = useState<TestHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [continueData, setContinueData] = useState<ContinueLearningData | null>(null);
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       setError(null);
       try {
-        const data = await testApi.getMyTests();
-        setHistory(data);
+        const [testsData, subjectsData] = await Promise.all([
+          testApi.getMyTests(),
+          subjectApi.getSubjects().catch(() => [] as Subject[])
+        ]);
+        setHistory(testsData);
+
+        for (const subj of subjectsData) {
+          try {
+            const personal = await roadmapApi.getPersonal(subj._id);
+            if (personal.nextRecommended) {
+              const nextNode = personal.nodes.find(
+                (n) => n.nodeId === personal.nextRecommended?.nodeId
+              );
+              const masteredCount = personal.nodes.filter(
+                (n) => n.progressStatus === 'mastered'
+              ).length;
+
+              let bookId: string | undefined;
+              try {
+                const can = await roadmapApi.getCanonical(subj._id);
+                bookId = can.sourceMeta?.bookId || subj.books?.[0]?._id;
+              } catch {
+                bookId = subj.books?.[0]?._id;
+              }
+
+              setContinueData({
+                subjectId: subj._id,
+                subjectTitle: subj.title,
+                nextNodeId: personal.nextRecommended.nodeId,
+                nextNodeTitle: nextNode?.title || personal.nextRecommended.nodeId,
+                nextNodeReason: personal.nextRecommended.reason,
+                totalNodes: personal.nodes.length,
+                masteredNodes: masteredCount,
+                bookId
+              });
+              break;
+            }
+          } catch {
+            // no roadmap for this subject
+          }
+        }
       } catch (err) {
         setError(getApiErrorMessage(err));
       } finally {
@@ -35,6 +92,36 @@ export const UserDashboard: React.FC = () => {
     };
     void load();
   }, []);
+
+  const handleContinue = () => {
+    if (!continueData) return;
+
+    if (!continueData.bookId) {
+      navigate(`/user/roadmap?subjectId=${continueData.subjectId}`);
+      return;
+    }
+
+    const sessionId = `roadmap-${continueData.subjectId}-${continueData.nextNodeId}-${Date.now()}`;
+    saveRoadmapContext({
+      subjectId: continueData.subjectId,
+      nodeId: continueData.nextNodeId,
+      nodeTitle: continueData.nextNodeTitle,
+      sessionId,
+      bookId: continueData.bookId,
+      fullBook: true
+    });
+
+    navigate('/user/test/start', {
+      state: {
+        subjectId: continueData.subjectId,
+        bookId: continueData.bookId,
+        fullBook: true,
+        roadmapNodeId: continueData.nextNodeId,
+        roadmapNodeTitle: continueData.nextNodeTitle,
+        roadmapSessionId: sessionId
+      }
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -52,6 +139,44 @@ export const UserDashboard: React.FC = () => {
           </Link>
         </div>
       </div>
+
+      {continueData && (
+        <div className="rounded-xl border border-blue-100 bg-blue-50/80 p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+                Продолжить обучение
+              </p>
+              <p className="mt-1 text-sm text-slate-600">
+                {continueData.subjectTitle}
+                <span className="mx-1 text-slate-400">·</span>
+                <span className="text-slate-500">
+                  {continueData.masteredNodes}/{continueData.totalNodes} тем освоено
+                </span>
+              </p>
+              <p className="mt-2 text-base font-medium text-slate-900">
+                {continueData.nextNodeTitle}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">{continueData.nextNodeReason}</p>
+            </div>
+            <Button onClick={handleContinue} className="shrink-0">
+              Пройти тест →
+            </Button>
+          </div>
+          <div className="mt-3">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-blue-100">
+              <div
+                className="h-full rounded-full bg-blue-500 transition-all"
+                style={{
+                  width: `${continueData.totalNodes > 0
+                    ? Math.round((continueData.masteredNodes / continueData.totalNodes) * 100)
+                    : 0}%`
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         <h2 className="text-lg font-semibold text-slate-900">История тестов</h2>

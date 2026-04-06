@@ -21,8 +21,9 @@ const swaggerSpec = {
   ],
   tags: [
     { name: 'Auth', description: 'OTP (request-otp → verify-phone), Google OAuth, login, create-admin' },
-    { name: 'Subjects', description: 'Предметы, книги, главы, темы, параграфы. Публичный список, admin — создание/импорт' },
+    { name: 'Subjects', description: 'Предметы, книги, главы, темы, параграфы. CRUD (admin), публичный список' },
     { name: 'Tests', description: 'Генерация (auth/guest), отправка ответов, привязка гостевого теста' },
+    { name: 'Roadmaps', description: 'Canonical roadmap (карта знаний), Personal roadmap (прогресс), рекомендации, обновление после теста' },
     { name: 'Users', description: 'Профиль, история тестов, статистика (требует auth)' },
     { name: 'System', description: 'Health check, отладка' }
   ],
@@ -323,7 +324,9 @@ const swaggerSpec = {
                 selectedOption: { type: 'string' }
               }
             }
-          }
+          },
+          roadmapNodeId: { type: 'string', description: 'ID узла roadmap (если тест запущен из карты знаний)' },
+          roadmapSessionId: { type: 'string', description: 'Уникальный ID roadmap-сессии (для идемпотентности)' }
         }
       },
       SubmitTestResponse: {
@@ -446,6 +449,154 @@ const swaggerSpec = {
           limit: { type: 'integer', minimum: 1, default: 20, description: 'Количество записей' },
           sortBy: { type: 'string', enum: ['createdAt', 'scorePercent'] },
           order: { type: 'string', enum: ['asc', 'desc'] }
+        }
+      },
+
+      CanonicalRoadmapNode: {
+        type: 'object',
+        properties: {
+          nodeId: { type: 'string', example: 'geo-intro' },
+          title: { type: 'string', example: 'Географическая оболочка и её границы' },
+          prerequisites: { type: 'array', items: { type: 'string' }, example: [] },
+          metadata: { type: 'object', description: 'Произвольные метаданные (chapterId, topicId и т.д.)' }
+        }
+      },
+      CanonicalRoadmapResponse: {
+        type: 'object',
+        properties: {
+          subjectId: { type: 'string' },
+          version: { type: 'integer', example: 1 },
+          nodes: { type: 'array', items: { $ref: '#/components/schemas/CanonicalRoadmapNode' } },
+          sourceMeta: {
+            type: 'object',
+            properties: {
+              bookId: { type: 'string' },
+              bookTitle: { type: 'string' },
+              bookAuthor: { type: 'string' },
+              chapterTitle: { type: 'string' },
+              fullBook: { type: 'boolean' },
+              contentLanguage: { type: 'string' }
+            }
+          }
+        }
+      },
+      PersonalRoadmapNode: {
+        type: 'object',
+        properties: {
+          nodeId: { type: 'string' },
+          title: { type: 'string' },
+          prerequisites: { type: 'array', items: { type: 'string' } },
+          metadata: { type: 'object' },
+          availability: { type: 'string', enum: ['locked', 'available'] },
+          progressStatus: { type: 'string', enum: ['not_started', 'in_progress', 'mastered'] },
+          attemptsCount: { type: 'integer' },
+          lastAttemptAt: { type: 'string', format: 'date-time' },
+          bestScore: { type: 'number', description: '0–100' },
+          avgScore: { type: 'number' },
+          masteryScore: { type: 'number', description: '0..1' },
+          isRecommended: { type: 'boolean' },
+          recommendedPriority: { type: 'integer' },
+          recommendedReason: { type: 'string', enum: ['CONTINUE_IN_PROGRESS', 'UNLOCKS_NEXT_TOPICS', 'LOW_MASTERY', 'PART_OF_MAIN_PATH', 'NOT_STARTED', ''] },
+          aiHint: { type: 'string', description: 'ИИ-подсказка (при ?ai=1)' }
+        }
+      },
+      NextRecommended: {
+        type: 'object',
+        nullable: true,
+        properties: {
+          nodeId: { type: 'string' },
+          reason: { type: 'string' },
+          priority: { type: 'integer' }
+        }
+      },
+      PersonalRoadmapResponse: {
+        type: 'object',
+        properties: {
+          version: { type: 'integer' },
+          subjectId: { type: 'string' },
+          nodes: { type: 'array', items: { $ref: '#/components/schemas/PersonalRoadmapNode' } },
+          nextRecommended: { $ref: '#/components/schemas/NextRecommended' },
+          topRecommendations: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                nodeId: { type: 'string' },
+                title: { type: 'string' },
+                reason: { type: 'string' },
+                priority: { type: 'integer' }
+              }
+            }
+          },
+          ai: {
+            type: 'object',
+            description: 'ИИ-слой (при ?ai=1)',
+            properties: {
+              coachSummary: { type: 'string' },
+              nextStepExplanation: { type: 'string' }
+            }
+          }
+        }
+      },
+      TestSubmittedRequest: {
+        type: 'object',
+        required: ['subjectId', 'nodeId', 'score', 'sessionId'],
+        properties: {
+          subjectId: { type: 'string', description: 'MongoDB ObjectId предмета' },
+          nodeId: { type: 'string', description: 'ID узла canonical roadmap' },
+          score: { type: 'number', minimum: 0, maximum: 100, description: 'Процент правильных ответов' },
+          sessionId: { type: 'string', description: 'Уникальный ID сессии (для идемпотентности)' },
+          submittedAt: { type: 'string', format: 'date-time', description: 'Время сдачи (опционально, по умолчанию now)' }
+        }
+      },
+      TestSubmittedResponse: {
+        type: 'object',
+        properties: {
+          idempotent: { type: 'boolean', description: 'true если повторный submit с тем же sessionId' },
+          updatedNodesDelta: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                nodeId: { type: 'string' },
+                progressStatus: { type: 'string', enum: ['not_started', 'in_progress', 'mastered'] }
+              }
+            }
+          },
+          nextRecommended: { $ref: '#/components/schemas/NextRecommended' },
+          topRecommendations: { type: 'array', items: { type: 'object' } }
+        }
+      },
+      UpsertCanonicalRequest: {
+        type: 'object',
+        required: ['subjectId', 'nodes'],
+        properties: {
+          subjectId: { type: 'string' },
+          version: { type: 'integer', minimum: 1, description: 'Версия (авто-инкремент если не указана)' },
+          nodes: {
+            type: 'array',
+            minItems: 1,
+            items: {
+              type: 'object',
+              required: ['nodeId', 'title'],
+              properties: {
+                nodeId: { type: 'string' },
+                title: { type: 'string' },
+                prerequisites: { type: 'array', items: { type: 'string' } },
+                metadata: { type: 'object' }
+              }
+            }
+          }
+        }
+      },
+      GenerateCanonicalRequest: {
+        type: 'object',
+        required: ['subjectId', 'bookId'],
+        properties: {
+          subjectId: { type: 'string' },
+          bookId: { type: 'string' },
+          chapterId: { type: 'string' },
+          fullBook: { type: 'boolean', default: false }
         }
       }
     }
@@ -587,18 +738,6 @@ const swaggerSpec = {
         }
       }
     },
-    '/subjects/{id}': {
-      get: {
-        tags: ['Subjects'],
-        summary: 'Предмет по ID (полная структура)',
-        description: 'Публичный. Возвращает предмет с полным деревом: books → chapters → topics → paragraphs.',
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'MongoDB ObjectId предмета' }],
-        responses: {
-          200: { description: 'Предмет', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/Subject' } } } } } },
-          404: { description: 'Предмет не найден' }
-        }
-      }
-    },
     '/subjects/{id}/books': {
       post: {
         tags: ['Subjects'],
@@ -699,6 +838,125 @@ const swaggerSpec = {
       }
     },
 
+    // ==================== SUBJECTS: UPDATE (PATCH) ====================
+    '/subjects/{id}': {
+      get: {
+        tags: ['Subjects'],
+        summary: 'Предмет по ID (полная структура)',
+        description: 'Публичный. Возвращает предмет с полным деревом: books → chapters → topics → paragraphs.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: { description: 'Предмет', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/Subject' } } } } } },
+          404: { description: 'Предмет не найден' }
+        }
+      },
+      patch: {
+        tags: ['Subjects'],
+        summary: 'Обновить предмет (admin)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { title: { type: 'string' }, description: { type: 'string' } } } } } },
+        responses: { 200: { description: 'Обновлено' }, 404: { description: 'Не найден' } }
+      },
+      delete: {
+        tags: ['Subjects'],
+        summary: 'Удалить предмет (admin)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { 200: { description: 'Удалено' }, 404: { description: 'Не найден' } }
+      }
+    },
+    '/subjects/{subjectId}/books/{bookId}': {
+      patch: {
+        tags: ['Subjects'],
+        summary: 'Обновить книгу (admin)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'subjectId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'bookId', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { title: { type: 'string' }, author: { type: 'string' }, contentLanguage: { type: 'string' } } } } } },
+        responses: { 200: { description: 'Обновлено' }, 404: { description: 'Не найдено' } }
+      },
+      delete: {
+        tags: ['Subjects'],
+        summary: 'Удалить книгу (admin)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'subjectId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'bookId', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        responses: { 200: { description: 'Удалено' }, 404: { description: 'Не найдено' } }
+      }
+    },
+    '/subjects/{subjectId}/books/{bookId}/chapters/{chapterId}': {
+      patch: {
+        tags: ['Subjects'],
+        summary: 'Обновить главу (admin)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'subjectId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'bookId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'chapterId', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { title: { type: 'string' }, order: { type: 'integer' } } } } } },
+        responses: { 200: { description: 'Обновлено' }, 404: { description: 'Не найдено' } }
+      },
+      delete: {
+        tags: ['Subjects'],
+        summary: 'Удалить главу (admin)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'subjectId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'bookId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'chapterId', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        responses: { 200: { description: 'Удалено' }, 404: { description: 'Не найдено' } }
+      }
+    },
+    '/subjects/{subjectId}/books/{bookId}/chapters/{chapterId}/topics/{topicId}': {
+      patch: {
+        tags: ['Subjects'],
+        summary: 'Обновить тему (admin)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'subjectId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'bookId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'chapterId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'topicId', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { title: { type: 'string' } } } } } },
+        responses: { 200: { description: 'Обновлено' }, 404: { description: 'Не найдено' } }
+      },
+      delete: {
+        tags: ['Subjects'],
+        summary: 'Удалить тему (admin)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'subjectId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'bookId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'chapterId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'topicId', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        responses: { 200: { description: 'Удалено' }, 404: { description: 'Не найдено' } }
+      }
+    },
+    '/subjects/{subjectId}/books/{bookId}/chapters/{chapterId}/topics/{topicId}/paragraphs/{paragraphId}': {
+      delete: {
+        tags: ['Subjects'],
+        summary: 'Удалить параграф (admin)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'subjectId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'bookId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'chapterId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'topicId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'paragraphId', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        responses: { 200: { description: 'Удалено' }, 404: { description: 'Не найдено' } }
+      }
+    },
+
     // ==================== TESTS ====================
     '/tests/generate': {
       post: {
@@ -768,6 +1026,112 @@ const swaggerSpec = {
         responses: {
           200: { description: 'Тест', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/GeneratedTest' } } } } } },
           404: { description: 'Тест не найден' }
+        }
+      }
+    },
+
+    // ==================== ROADMAPS ====================
+    '/roadmaps/canonical': {
+      get: {
+        tags: ['Roadmaps'],
+        summary: 'Canonical roadmap (карта знаний по предмету)',
+        description: 'Статичная структура тем по предмету (одинакова для всех). Кэшируема.',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [{ name: 'subjectId', in: 'query', required: true, schema: { type: 'string' }, description: 'MongoDB ObjectId предмета' }],
+        responses: {
+          200: { description: 'Canonical roadmap', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/CanonicalRoadmapResponse' } } } } } },
+          404: { description: 'Roadmap не настроен для предмета' }
+        }
+      }
+    },
+    '/roadmaps/personal': {
+      get: {
+        tags: ['Roadmaps'],
+        summary: 'Personal roadmap (прогресс пользователя)',
+        description: 'Персональная проекция canonical roadmap: узлы с состояниями (locked/available, not_started/in_progress/mastered), метриками и рекомендациями. При ?ai=1 — ИИ-подсказки.',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'subjectId', in: 'query', required: true, schema: { type: 'string' }, description: 'MongoDB ObjectId предмета' },
+          { name: 'ai', in: 'query', schema: { type: 'string', enum: ['0', '1'] }, description: '1 — включить ИИ-слой (coachSummary, aiHint)' }
+        ],
+        responses: {
+          200: { description: 'Personal roadmap', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/PersonalRoadmapResponse' } } } } } },
+          404: { description: 'Canonical roadmap не найден' }
+        }
+      }
+    },
+    '/roadmaps/next': {
+      get: {
+        tags: ['Roadmaps'],
+        summary: 'Следующий рекомендуемый узел',
+        description: 'Возвращает top-1 рекомендацию и альтернативы. При ?ai=1 — ИИ-пояснение.',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'subjectId', in: 'query', required: true, schema: { type: 'string' } },
+          { name: 'ai', in: 'query', schema: { type: 'string', enum: ['0', '1'] } }
+        ],
+        responses: {
+          200: {
+            description: 'Рекомендация',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean' },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        nextRecommended: { $ref: '#/components/schemas/NextRecommended' },
+                        alternatives: { type: 'array', items: { type: 'object', properties: { nodeId: { type: 'string' }, title: { type: 'string' }, reason: { type: 'string' }, priority: { type: 'integer' } } } },
+                        ai: { type: 'object', properties: { coachSummary: { type: 'string' }, nextStepExplanation: { type: 'string' } } }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    '/roadmaps/events/test-submitted': {
+      post: {
+        tags: ['Roadmaps'],
+        summary: 'Обработать завершение теста (обновить прогресс)',
+        description: 'Идемпотентно по sessionId. Записывает attempt, пересчитывает mastery, разблокирует узлы, обновляет рекомендации. Также вызывается автоматически через POST /tests/submit при наличии roadmapNodeId.',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/TestSubmittedRequest' } } } },
+        responses: {
+          200: { description: 'Прогресс обновлён', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/TestSubmittedResponse' } } } } } },
+          400: { description: 'Невалидные данные (nodeId, subjectId)' },
+          404: { description: 'Canonical roadmap не найден' }
+        }
+      }
+    },
+    '/roadmaps/admin/canonical': {
+      post: {
+        tags: ['Roadmaps'],
+        summary: 'Создать/обновить canonical roadmap вручную (admin)',
+        description: 'Принимает JSON с узлами. Валидирует: уникальные nodeId, существующие prerequisites, отсутствие циклов.',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/UpsertCanonicalRequest' } } } },
+        responses: {
+          201: { description: 'Canonical roadmap сохранён', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/CanonicalRoadmapResponse' } } } } } },
+          400: { description: 'Невалидные данные (циклы, дубликаты nodeId и т.д.)' }
+        }
+      }
+    },
+    '/roadmaps/admin/generate-canonical': {
+      post: {
+        tags: ['Roadmaps'],
+        summary: 'Сгенерировать canonical roadmap по книге через ИИ (admin)',
+        description: 'Берёт текст книги/главы, через ИИ генерирует граф узлов и сохраняет. Аналогично генерации теста.',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/GenerateCanonicalRequest' } } } },
+        responses: {
+          201: { description: 'Canonical roadmap сгенерирован ИИ', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/CanonicalRoadmapResponse' } } } } } },
+          404: { description: 'Предмет или книга не найдены' }
         }
       }
     },

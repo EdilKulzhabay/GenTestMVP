@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { subjectApi } from '../../api/subject.api';
 import { roadmapApi } from '../../api/roadmap.api';
 import { Subject } from '../../types/subject.types';
 import { CanonicalRoadmapResponse, PersonalRoadmapResponse } from '../../types/roadmap.types';
 import { Loader } from '../../components/ui/Loader';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
+import { Button } from '../../components/ui/Button';
 import { getApiErrorMessage } from '../../utils/error';
+import { saveRoadmapContext } from '../../utils/session';
 
 function badgeClass(kind: 'avail' | 'prog' | 'neutral'): string {
   const base = 'inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold';
@@ -26,14 +28,24 @@ const PROG_RU: Record<string, string> = {
   mastered: 'Пройдено'
 };
 
+const REASON_RU: Record<string, string> = {
+  CONTINUE_IN_PROGRESS: 'Вы уже начали эту тему',
+  UNLOCKS_NEXT_TOPICS: 'Откроет следующие темы',
+  LOW_MASTERY: 'Нужно подтянуть',
+  PART_OF_MAIN_PATH: 'Основной путь обучения',
+  NOT_STARTED: 'Следующий по порядку'
+};
+
 export const KnowledgeMapPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const subjectId = searchParams.get('subjectId');
 
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [listLoading, setListLoading] = useState(!subjectId);
 
   const [subjectTitle, setSubjectTitle] = useState('');
+  const [subject, setSubject] = useState<Subject | null>(null);
   const [canonical, setCanonical] = useState<CanonicalRoadmapResponse | null>(null);
   const [personal, setPersonal] = useState<PersonalRoadmapResponse | null>(null);
   const [loading, setLoading] = useState(Boolean(subjectId));
@@ -72,6 +84,7 @@ export const KnowledgeMapPage: React.FC = () => {
       try {
         const subj = await subjectApi.getSubjectById(subjectId);
         setSubjectTitle(subj.title);
+        setSubject(subj);
       } catch {
         setError('Не удалось загрузить предмет');
         setLoading(false);
@@ -103,6 +116,39 @@ export const KnowledgeMapPage: React.FC = () => {
 
   const selectSubject = (id: string) => {
     setSearchParams({ subjectId: id });
+  };
+
+  const handleStartTestForNode = (nodeId: string) => {
+    if (!subjectId || !subject) return;
+
+    const bookId = canonical?.sourceMeta?.bookId || subject.books?.[0]?._id;
+    if (!bookId) return;
+
+    const node = personal?.nodes.find((n) => n.nodeId === nodeId)
+      || canonical?.nodes.find((n) => n.nodeId === nodeId);
+    const nodeTitle = node?.title || nodeId;
+
+    const sessionId = `roadmap-${subjectId}-${nodeId}-${Date.now()}`;
+
+    saveRoadmapContext({
+      subjectId,
+      nodeId,
+      nodeTitle,
+      sessionId,
+      bookId,
+      fullBook: true
+    });
+
+    navigate('/user/test/start', {
+      state: {
+        subjectId,
+        bookId,
+        fullBook: true,
+        roadmapNodeId: nodeId,
+        roadmapNodeTitle: nodeTitle,
+        roadmapSessionId: sessionId
+      }
+    });
   };
 
   if (!subjectId) {
@@ -256,62 +302,130 @@ export const KnowledgeMapPage: React.FC = () => {
                   personal.nextRecommended.nodeId}
               </p>
               <p className="mt-1 text-xs text-slate-600">{personal.nextRecommended.reason}</p>
+              <Button
+                onClick={() => handleStartTestForNode(personal.nextRecommended!.nodeId)}
+                className="mt-3 text-sm"
+              >
+                Пройти тест по этой теме
+              </Button>
+            </div>
+          )}
+
+          {personal.topRecommendations.length > 1 && (
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
+                Рекомендованные темы
+              </p>
+              <ul className="mt-2 space-y-2">
+                {personal.topRecommendations.map((rec) => (
+                  <li key={rec.nodeId} className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-900">{rec.title}</p>
+                      <p className="text-xs text-slate-500">{REASON_RU[rec.reason] ?? rec.reason}</p>
+                    </div>
+                    <Button
+                      onClick={() => handleStartTestForNode(rec.nodeId)}
+                      variant="outline"
+                      className="shrink-0 text-xs"
+                    >
+                      Пройти тест
+                    </Button>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
           <ul className="space-y-3">
-            {personal.nodes.map((node) => (
-              <li
-                key={node.nodeId}
-                className={`rounded-xl border p-4 shadow-sm ${
-                  node.isRecommended
-                    ? 'border-blue-200 bg-blue-50/40'
-                    : 'border-slate-200 bg-white'
-                }`}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium text-slate-900">{node.title}</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <span className={badgeClass('avail')}>
-                        {AVAIL_RU[node.availability] ?? node.availability}
-                      </span>
-                      <span className={badgeClass('prog')}>
-                        {PROG_RU[node.progressStatus] ?? node.progressStatus}
-                      </span>
-                      {node.isRecommended && (
-                        <span className={badgeClass('neutral')}>Рекомендуем</span>
+            {personal.nodes.map((node) => {
+              const isLocked = node.availability === 'locked';
+              const canStartTest =
+                node.availability === 'available' && node.progressStatus !== 'mastered';
+
+              const cardStyle = isLocked
+                ? 'border-slate-100 bg-slate-50 opacity-60'
+                : node.isRecommended
+                  ? 'border-blue-200 bg-blue-50/40'
+                  : node.progressStatus === 'mastered'
+                    ? 'border-emerald-200 bg-emerald-50/30'
+                    : 'border-slate-200 bg-white';
+
+              return (
+                <li
+                  key={node.nodeId}
+                  className={`rounded-xl border p-4 shadow-sm ${cardStyle}`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className={`font-medium ${isLocked ? 'text-slate-400' : 'text-slate-900'}`}>
+                        {isLocked && <span className="mr-1">🔒</span>}
+                        {node.title}
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <span className={badgeClass(isLocked ? 'neutral' : 'avail')}>
+                          {AVAIL_RU[node.availability] ?? node.availability}
+                        </span>
+                        <span className={badgeClass('prog')}>
+                          {PROG_RU[node.progressStatus] ?? node.progressStatus}
+                        </span>
+                        {node.isRecommended && (
+                          <span className={badgeClass('neutral')}>Рекомендуем</span>
+                        )}
+                      </div>
+                      {node.isRecommended && node.recommendedReason && (
+                        <p className="mt-1 text-xs text-blue-600">
+                          {REASON_RU[node.recommendedReason] ?? node.recommendedReason}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-col items-end gap-2 text-xs text-slate-600">
+                      {node.attemptsCount > 0 && (
+                        <div className="text-right">
+                          <p>Лучший: {node.bestScore}%</p>
+                          <p>Попыток: {node.attemptsCount}</p>
+                        </div>
+                      )}
+                      {canStartTest && (
+                        <Button
+                          onClick={() => handleStartTestForNode(node.nodeId)}
+                          variant={node.isRecommended ? undefined : 'outline'}
+                          className="text-xs"
+                        >
+                          {node.progressStatus === 'in_progress' ? 'Продолжить' : 'Пройти тест'}
+                        </Button>
+                      )}
+                      {node.progressStatus === 'mastered' && (
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                          ✓ Освоено
+                        </span>
                       )}
                     </div>
                   </div>
-                  <div className="text-right text-xs text-slate-600">
-                    {node.attemptsCount > 0 && (
-                      <>
-                        <p>Лучший: {node.bestScore}%</p>
-                        <p>Попыток: {node.attemptsCount}</p>
-                      </>
-                    )}
-                  </div>
-                </div>
-                {node.aiHint && (
-                  <p className="mt-2 border-t border-slate-100 pt-2 text-sm text-slate-600">
-                    {node.aiHint}
-                  </p>
-                )}
-              </li>
-            ))}
+                  {isLocked && node.prerequisites.length > 0 && (
+                    <p className="mt-2 text-xs text-slate-400">
+                      Сначала пройдите: {node.prerequisites.join(', ')}
+                    </p>
+                  )}
+                  {node.aiHint && (
+                    <p className="mt-2 border-t border-slate-100 pt-2 text-sm text-slate-600">
+                      {node.aiHint}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
 
-      {!loading && canonical && (
+      {!loading && canonical && !personal && (
         <div className="flex flex-wrap gap-3 pt-2">
           <Link
             to="/user/books"
             state={{ subjectId }}
             className="text-sm font-medium text-emerald-700 hover:underline"
           >
-            Пройти тест по этому предмету →
+            Выбрать книгу и пройти тест →
           </Link>
         </div>
       )}

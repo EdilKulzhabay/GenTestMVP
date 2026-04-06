@@ -12,7 +12,9 @@ import {
   getCurrentTest,
   saveCurrentAnswers,
   getCurrentAnswers,
-  saveGuestTestSubmission
+  saveGuestTestSubmission,
+  getRoadmapContext,
+  clearRoadmapContext
 } from '../../utils/session';
 import { useGuestMode } from '../../hooks/useGuestMode';
 
@@ -34,8 +36,11 @@ export const TestPage: React.FC = () => {
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const savedAnswers = test ? getCurrentAnswers(test._id) : null;
+  const autoCorrect = test
+    ? test.questions.map((q) => q.correctOption ?? '')
+    : [];
   const initialAnswers = test
-    ? normalizeAnswers(savedAnswers, test.questions.length)
+    ? normalizeAnswers(savedAnswers ?? autoCorrect, test.questions.length)
     : [];
   const prevLengthRef = useRef(initialAnswers.length);
 
@@ -96,8 +101,19 @@ export const TestPage: React.FC = () => {
         questionText: question.questionText,
         selectedOption: values.answers[index]
       }));
+
+      const roadmapCtx = getRoadmapContext();
+
+      const submitPayload = {
+        testId: test._id,
+        answers: submissionAnswers,
+        ...(roadmapCtx && !isGuest
+          ? { roadmapNodeId: roadmapCtx.nodeId, roadmapSessionId: roadmapCtx.sessionId }
+          : {})
+      };
+
       const submitFn = isGuest ? testApi.submitTestGuest : testApi.submitTest;
-      const result = await submitFn({ testId: test._id, answers: submissionAnswers });
+      const result = await submitFn(submitPayload);
 
       if (isGuest) {
         saveGuestTestSubmission({ testId: test._id, answers: submissionAnswers });
@@ -105,7 +121,13 @@ export const TestPage: React.FC = () => {
 
       saveLastResult(result);
       clearCurrentTest();
-      navigate(`${basePath}/test/result`, { replace: true });
+
+      const navState = roadmapCtx
+        ? { roadmapSubjectId: roadmapCtx.subjectId, roadmapNodeId: roadmapCtx.nodeId, roadmapNodeTitle: roadmapCtx.nodeTitle }
+        : undefined;
+      clearRoadmapContext();
+
+      navigate(`${basePath}/test/result`, { replace: true, state: navState });
     } catch (error) {
       setServerError(getApiErrorMessage(error));
     } finally {

@@ -82,5 +82,45 @@ export const subjectApi = {
       { params: { subjectId, bookId, chapterId } }
     );
     return data.data;
+  },
+
+  async updateSubject(id: string, payload: { title?: string; description?: string }): Promise<Subject> {
+    const { data } = await axiosInstance.patch<ApiResponse<Subject>>(`/subjects/${id}`, payload);
+    return data.data;
+  },
+
+  async deleteSubject(id: string): Promise<void> {
+    await axiosInstance.delete(`/subjects/${id}`);
+  },
+
+  async updateBook(subjectId: string, bookId: string, payload: { title?: string; author?: string; contentLanguage?: string }): Promise<Subject> {
+    const { data } = await axiosInstance.patch<ApiResponse<Subject>>(`/subjects/${subjectId}/books/${bookId}`, payload);
+    return data.data;
+  },
+
+  async deleteBook(subjectId: string, bookId: string): Promise<void> {
+    await axiosInstance.delete(`/subjects/${subjectId}/books/${bookId}`);
+  },
+
+  async updateChapter(subjectId: string, bookId: string, chapterId: string, payload: { title?: string; order?: number }): Promise<Subject> {
+    const { data } = await axiosInstance.patch<ApiResponse<Subject>>(`/subjects/${subjectId}/books/${bookId}/chapters/${chapterId}`, payload);
+    return data.data;
+  },
+
+  async deleteChapter(subjectId: string, bookId: string, chapterId: string): Promise<void> {
+    await axiosInstance.delete(`/subjects/${subjectId}/books/${bookId}/chapters/${chapterId}`);
+  },
+
+  async updateTopic(subjectId: string, bookId: string, chapterId: string, topicId: string, payload: { title?: string }): Promise<Subject> {
+    const { data } = await axiosInstance.patch<ApiResponse<Subject>>(`/subjects/${subjectId}/books/${bookId}/chapters/${chapterId}/topics/${topicId}`, payload);
+    return data.data;
+  },
+
+  async deleteTopic(subjectId: string, bookId: string, chapterId: string, topicId: string): Promise<void> {
+    await axiosInstance.delete(`/subjects/${subjectId}/books/${bookId}/chapters/${chapterId}/topics/${topicId}`);
+  },
+
+  async deleteParagraph(subjectId: string, bookId: string, chapterId: string, topicId: string, paragraphId: string): Promise<void> {
+    await axiosInstance.delete(`/subjects/${subjectId}/books/${bookId}/chapters/${chapterId}/topics/${topicId}/paragraphs/${paragraphId}`);
   }
 };

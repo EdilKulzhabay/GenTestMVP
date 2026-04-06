@@ -197,4 +197,80 @@ router.post(
   asyncHandler(subjectController.addParagraph.bind(subjectController))
 );
 
+// ========== UPDATE ==========
+
+router.patch(
+  '/:id',
+  isAdmin,
+  [param('id').isMongoId()],
+  validate,
+  asyncHandler(subjectController.updateSubject.bind(subjectController))
+);
+
+router.patch(
+  '/:subjectId/books/:bookId',
+  isAdmin,
+  [param('subjectId').isMongoId(), param('bookId').isMongoId()],
+  validate,
+  asyncHandler(subjectController.updateBook.bind(subjectController))
+);
+
+router.patch(
+  '/:subjectId/books/:bookId/chapters/:chapterId',
+  isAdmin,
+  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId()],
+  validate,
+  asyncHandler(subjectController.updateChapter.bind(subjectController))
+);
+
+router.patch(
+  '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId',
+  isAdmin,
+  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), param('topicId').isMongoId()],
+  validate,
+  asyncHandler(subjectController.updateTopic.bind(subjectController))
+);
+
+// ========== DELETE ==========
+
+router.delete(
+  '/:id',
+  isAdmin,
+  [param('id').isMongoId()],
+  validate,
+  asyncHandler(subjectController.deleteSubject.bind(subjectController))
+);
+
+router.delete(
+  '/:subjectId/books/:bookId',
+  isAdmin,
+  [param('subjectId').isMongoId(), param('bookId').isMongoId()],
+  validate,
+  asyncHandler(subjectController.deleteBook.bind(subjectController))
+);
+
+router.delete(
+  '/:subjectId/books/:bookId/chapters/:chapterId',
+  isAdmin,
+  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId()],
+  validate,
+  asyncHandler(subjectController.deleteChapter.bind(subjectController))
+);
+
+router.delete(
+  '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId',
+  isAdmin,
+  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), param('topicId').isMongoId()],
+  validate,
+  asyncHandler(subjectController.deleteTopic.bind(subjectController))
+);
+
+router.delete(
+  '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/paragraphs/:paragraphId',
+  isAdmin,
+  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), param('topicId').isMongoId(), param('paragraphId').isMongoId()],
+  validate,
+  asyncHandler(subjectController.deleteParagraph.bind(subjectController))
+);
+
 export default router;

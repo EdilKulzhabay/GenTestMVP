@@ -60,7 +60,7 @@ class TestController {
     });
   }
 
-  /** Сформировать тест для клиента (без правильных ответов) */
+  /** Сформировать тест для клиента. TODO: убрать correctOption в продакшене */
   private sanitize(test: any) {
     return {
       _id: test._id,
@@ -69,7 +69,8 @@ class TestController {
       chapterId: test.chapterId,
       questions: test.questions.map((q: any) => ({
         questionText: q.questionText,
-        options: q.options
+        options: q.options,
+        correctOption: q.correctOption
       })),
       createdAt: test.createdAt
     };
@@ -228,7 +229,7 @@ class TestController {
           submittedAt: new Date()
         });
       } catch (err) {
-        console.warn('[roadmap] submit hook skipped:', err);
+        console.error('[submitTest] roadmap update failed:', err);
       }
     }
 

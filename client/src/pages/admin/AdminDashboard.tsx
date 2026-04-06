@@ -186,6 +186,12 @@ export const AdminDashboard: React.FC = () => {
 
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Link
+                    to={`/admin/subjects/${subject._id}`}
+                    className="rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-100"
+                  >
+                    Подробнее
+                  </Link>
+                  <Link
                     to="/admin/books/new"
                     state={{ subjectId: subject._id }}
                     className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"

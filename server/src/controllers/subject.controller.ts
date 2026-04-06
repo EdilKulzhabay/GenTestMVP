@@ -134,6 +134,108 @@ class SubjectController {
     await subject.save();
     success(res, subject, 'Paragraph added successfully', 201);
   }
+
+  async updateSubject(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.id);
+    const { title, description } = req.body;
+    if (title !== undefined) subject.title = title.trim();
+    if (description !== undefined) subject.description = description.trim();
+    await subject.save();
+    success(res, subject, 'Subject updated');
+  }
+
+  async deleteSubject(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.id);
+    await subject.deleteOne();
+    success(res, { deleted: true }, 'Subject deleted');
+  }
+
+  async updateBook(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const { title, author, contentLanguage } = req.body;
+    if (title !== undefined) book.title = title.trim();
+    if (author !== undefined) book.author = author.trim() || undefined;
+    if (contentLanguage !== undefined) book.contentLanguage = contentLanguage.trim() || undefined;
+    await subject.save();
+    success(res, subject, 'Book updated');
+  }
+
+  async deleteBook(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const idx = subject.books.findIndex((b) => b._id?.toString() === req.params.bookId);
+    if (idx === -1) throw AppError.notFound('Book not found');
+    subject.books.splice(idx, 1);
+    await subject.save();
+    success(res, subject, 'Book deleted');
+  }
+
+  async updateChapter(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    if (!chapter) throw AppError.notFound('Chapter not found');
+    const { title, order } = req.body;
+    if (title !== undefined) chapter.title = title.trim();
+    if (order !== undefined) chapter.order = order;
+    await subject.save();
+    success(res, subject, 'Chapter updated');
+  }
+
+  async deleteChapter(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const idx = book.chapters.findIndex((c) => c._id?.toString() === req.params.chapterId);
+    if (idx === -1) throw AppError.notFound('Chapter not found');
+    book.chapters.splice(idx, 1);
+    await subject.save();
+    success(res, subject, 'Chapter deleted');
+  }
+
+  async updateTopic(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    if (!chapter) throw AppError.notFound('Chapter not found');
+    const topic = chapter.topics.find((t) => t._id?.toString() === req.params.topicId);
+    if (!topic) throw AppError.notFound('Topic not found');
+    const { title } = req.body;
+    if (title !== undefined) topic.title = title.trim();
+    await subject.save();
+    success(res, subject, 'Topic updated');
+  }
+
+  async deleteTopic(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    if (!chapter) throw AppError.notFound('Chapter not found');
+    const idx = chapter.topics.findIndex((t) => t._id?.toString() === req.params.topicId);
+    if (idx === -1) throw AppError.notFound('Topic not found');
+    chapter.topics.splice(idx, 1);
+    await subject.save();
+    success(res, subject, 'Topic deleted');
+  }
+
+  async deleteParagraph(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    if (!chapter) throw AppError.notFound('Chapter not found');
+    const topic = chapter.topics.find((t) => t._id?.toString() === req.params.topicId);
+    if (!topic) throw AppError.notFound('Topic not found');
+    const idx = topic.paragraphs.findIndex((p) => p._id?.toString() === req.params.paragraphId);
+    if (idx === -1) throw AppError.notFound('Paragraph not found');
+    topic.paragraphs.splice(idx, 1);
+    await subject.save();
+    success(res, subject, 'Paragraph deleted');
+  }
 }
 
 export const subjectController = new SubjectController();

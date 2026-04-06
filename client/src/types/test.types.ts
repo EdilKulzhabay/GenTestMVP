@@ -3,6 +3,8 @@ import type { RoadmapTestSubmittedResponse } from './roadmap.types';
 export interface TestQuestion {
   questionText: string;
   options: string[];
+  /** TODO: временное поле для быстрого тестирования — убрать в продакшене */
+  correctOption?: string;
 }
 
 export interface GeneratedTest {
@@ -19,6 +21,8 @@ export interface GenerateTestRequest {
   bookId: string;
   chapterId?: string;
   fullBook?: boolean;
+  /** Тема-фокус из roadmap-узла — AI сфокусирует вопросы на этой теме */
+  topicFocus?: string;
 }
 
 export interface SubmitAnswer {

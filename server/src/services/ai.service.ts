@@ -57,6 +57,10 @@ class AIService {
       ? `- Язык полей questionText, options, correctOption, aiExplanation и topicTitle: ${content.metadata.contentLanguage.trim()}. Не смешивай с другим языком.`
       : '- Язык вопросов, вариантов ответов и пояснений должен совпадать с языком приведённого учебного текста (например текст на казахском — весь вывод на казахском; на русском — на русском; на английском — на английском).';
 
+    const topicFocusHint = content.metadata.topicFocus?.trim()
+      ? `- ВАЖНО: Все 10 вопросов должны быть сфокусированы на теме «${content.metadata.topicFocus.trim()}». Если в контенте недостаточно материала именно по этой теме, генерируй максимально близкие по смыслу вопросы.`
+      : '';
+
     const prompt = [
       'Ты — ассистент преподавателя. Сгенерируй ровно 10 вопросов для теста.',
       'Формат ответа: строгий JSON без Markdown.',
@@ -66,6 +70,7 @@ class AIService {
       '] }',
       'Требования:',
       languageRule,
+      topicFocusHint,
       '- 4 варианта ответа.',
       '- correctOption должен быть одним из options.',
       '- aiExplanation краткое (1-2 предложения).',

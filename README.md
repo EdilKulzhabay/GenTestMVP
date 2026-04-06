@@ -4,7 +4,7 @@
 
 ## Что это
 
-Преподаватель загружает учебный контент (предметы, книги, главы, темы, параграфы) через админ-панель — вручную или импортом JSON-файла. Студент выбирает предмет/книгу/главу и запускает генерацию теста. AI формирует вопросы по материалу, проверяет ответы, даёт развёрнутый анализ ошибок и ссылки на конкретные места в учебнике.
+Преподаватель загружает учебный контент (предметы, книги, главы, темы, параграфы) через админ-панель — вручную или импортом JSON-файла. Студент выбирает предмет, видит **карту знаний (roadmap)** с персональным прогрессом, выбирает доступный узел и запускает генерацию теста. AI формирует вопросы по материалу, проверяет ответы, даёт развёрнутый анализ ошибок со ссылками на учебник и рекомендует следующий шаг.
 
 ## Быстрый старт
 
@@ -92,7 +92,7 @@ curl -X POST http://localhost:5000/api/v1/subjects/import \
 |------|-----------|
 | **Frontend** | React 18, TypeScript, Vite, Tailwind CSS, React Router 6, React Hook Form + Zod |
 | **Backend** | Node.js, Express, TypeScript, Mongoose (MongoDB) |
-| **Auth** | JWT в httpOnly cookie, двухэтапная регистрация с email-верификацией |
+| **Auth** | JWT в httpOnly cookie, OTP через WhatsApp/Telegram, Google OAuth |
 | **AI** | OpenAI API (mock при отсутствии ключа) |
 | **Docs** | Swagger UI (`/api-docs`) |
 
@@ -105,29 +105,32 @@ GenTestMVP/
 ├── whatsapp-bot/               # WhatsApp Web для OTP (отдельный сервис)
 ├── telegram-bot/               # Telegram webhook + poll (отдельный сервис)
 ├── client/src/
-│   ├── api/                    # Axios-клиенты к API
+│   ├── api/                    # Axios-клиенты (test, subject, roadmap, user)
 │   ├── components/             # UI-компоненты, layouts, ErrorBoundary
 │   ├── hooks/                  # Custom hooks (useGuestMode)
 │   ├── pages/                  # Страницы: admin, auth, guest, user, welcome
-│   │   └── admin/              # Дашборд, CRUD предметов, импорт JSON
+│   │   ├── admin/              # Дашборд, CRUD предметов, импорт JSON, SubjectDetailPage
+│   │   └── user/               # Дашборд, KnowledgeMapPage, TestPage, TestResultPage
 │   ├── router/                 # React Router + PrivateRoute
 │   ├── store/                  # Auth store (Context + useSyncExternalStore)
-│   ├── types/                  # TypeScript-типы
-│   └── utils/                  # Session storage, error helpers
+│   ├── types/                  # TypeScript-типы (test, subject, roadmap, user)
+│   └── utils/                  # Session storage (roadmap context), error helpers
 │
 ├── server/src/
 │   ├── config/                 # DB, constants, Swagger
-│   ├── controllers/            # Auth, Subject, Test, User
+│   ├── controllers/            # Auth, Subject, Test, User, Roadmap
 │   ├── middlewares/             # Auth, validation, error handler
-│   ├── models/                 # Subject, User, Test, PendingRegistration
-│   ├── routes/                 # Express-маршруты
+│   ├── models/                 # Subject, User, Test, CanonicalRoadmap, UserRoadmapProgress, RoadmapAttempt
+│   ├── roadmap/                # Бизнес-правила roadmap (mastery threshold, recommendations)
+│   ├── routes/                 # Express-маршруты (auth, subjects, tests, users, roadmaps)
 │   ├── scripts/                # createAdmin.ts
-│   ├── services/               # AI-сервис, email-сервис
-│   ├── types/                  # Серверные типы и DTO
-│   └── utils/                  # JWT, AppError, API response helpers
+│   ├── services/               # AI-сервис, roadmap-сервис, email-сервис
+│   ├── types/                  # Серверные типы и DTO (roadmap.types.ts)
+│   └── utils/                  # JWT, AppError, roadmapJson, roadmapGraph
 │
 └── docs/
-    └── ARCHITECTURE.md         # Подробная архитектура
+    ├── ARCHITECTURE.md         # Подробная архитектура
+    └── ROADMAP_SPEC.md         # Спецификация Roadmap-сервиса
 ```
 
 ## API документация
@@ -141,10 +144,12 @@ GenTestMVP/
 `/welcome` → `/guest/subjects` → выбор книги → генерация теста → прохождение → тизер результата → вход/регистрация → **гостевой тест автоматически сохраняется в историю** → полный результат
 
 ### Студент (user)
-Вход → `/user` (дашборд + история) → выбор предмета → книга/глава → генерация → тест → полный результат с AI-разбором
+Вход → `/user` (дашборд + «Продолжить обучение») → карта знаний (`/user/roadmap`) → выбор доступного узла → генерация теста → тест → результат + AI-разбор → обновление прогресса → рекомендация следующего шага
+
+Также доступен свободный тест: выбор предмета → книга/глава → генерация → тест → результат
 
 ### Администратор (admin)
-Вход → `/admin` → импорт предмета из JSON / ручное создание → добавление книг, глав, тем, параграфов
+Вход → `/admin` → импорт предмета из JSON / ручное создание → добавление/редактирование/удаление книг, глав, тем, параграфов → создание canonical roadmap (вручную или через ИИ)
 
 ## Первоначальная настройка для клиента
 

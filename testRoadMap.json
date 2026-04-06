@@ -1,0 +1,46 @@
+{
+    "subjectId": "696d59f0ffa899f0c711ad59",
+    "version": 1,
+    "nodes": [
+      {
+        "nodeId": "geo-intro",
+        "title": "Географическая оболочка и её границы",
+        "prerequisites": [],
+        "metadata": {
+          "chapterId": "696d5af9ffa899f0c711ad84",
+          "topicId": "696d5c53ffa899f0c711ad9e",
+          "chapterOrder": 1,
+          "description": "Географическая оболочка Земли: атмосфера, гидросфера, литосфера, биосфера. Круговороты вещества и энергии. Границы оболочки."
+        }
+      },
+      {
+        "nodeId": "geo-lithospheric-plates",
+        "title": "Теория литосферных плит. Платформы и складчатые пояса",
+        "prerequisites": ["geo-intro"],
+        "metadata": {
+          "chapterId": "696d955fa57f7d62223432b4",
+          "topicId": "696d95f3a57f7d62223432ea",
+          "chapterOrder": 2,
+          "description": "Дрейф континентов, гипотеза Вегенера, литосферные плиты, срединно-океанические хребты, платформы, щиты, складчатые пояса."
+        }
+      },
+      {
+        "nodeId": "bio-cell-intro",
+        "title": "Введение. Клетка как объект изучения биологии",
+        "prerequisites": [],
+        "metadata": {
+          "chapterId": "696d9730a57f7d62223433ae",
+          "topicId": "696d9762a57f7d62223433c8",
+          "chapterOrder": 3,
+          "description": "Биология как наука, клетка — единица живого, органоиды, ткани, органы.",
+          "warning": "Этот контент относится к биологии, а не к географии — возможно добавлен ошибочно."
+        }
+      }
+    ],
+    "sourceMeta": {
+      "bookId": "696d5a14ffa899f0c711ad65",
+      "bookTitle": "География 7 класс Колмакова 2023",
+      "bookAuthor": "Колмакова",
+      "contentLanguage": "ru"
+    }
+  }

@@ -200,26 +200,27 @@ class RoadmapService {
     if (!canonicalDoc) throw AppError.notFound('Canonical roadmap not configured for this subject');
 
     const canonicalNodes = canonicalDoc.nodes;
-    let progressDoc = await UserRoadmapProgress.findOne({ userId, subjectId });
+    let rawProgress = await UserRoadmapProgress.findOne({ userId, subjectId }).lean();
 
-    if (!progressDoc) {
+    if (!rawProgress) {
       const merged = this.mergeProgressWithCanonical(canonicalNodes, []);
-      progressDoc = await UserRoadmapProgress.create({
-        userId,
-        subjectId,
-        canonicalVersion: canonicalDoc.version,
-        nodes: merged
-      });
+      rawProgress = await UserRoadmapProgress.findOneAndUpdate(
+        { userId, subjectId },
+        { $set: { canonicalVersion: canonicalDoc.version, nodes: merged }, $setOnInsert: { userId, subjectId } },
+        { upsert: true, new: true }
+      ).lean();
     } else {
-      const merged = this.mergeProgressWithCanonical(canonicalNodes, progressDoc.nodes);
-      if (merged.length !== progressDoc.nodes.length || progressDoc.canonicalVersion !== canonicalDoc.version) {
-        progressDoc.nodes = merged;
-        progressDoc.canonicalVersion = canonicalDoc.version;
-        await progressDoc.save();
+      const merged = this.mergeProgressWithCanonical(canonicalNodes, rawProgress.nodes);
+      if (merged.length !== rawProgress.nodes.length || rawProgress.canonicalVersion !== canonicalDoc.version) {
+        rawProgress = await UserRoadmapProgress.findOneAndUpdate(
+          { userId, subjectId },
+          { $set: { canonicalVersion: canonicalDoc.version, nodes: merged } },
+          { new: true }
+        ).lean();
       }
     }
 
-    const progressByNode = progressMap(progressDoc.nodes);
+    const progressByNode = progressMap(rawProgress!.nodes);
     const mastered = masteredSet(canonicalNodes, progressByNode);
 
     const views: IPersonalRoadmapNodeView[] = canonicalNodes.map((cn) => {
@@ -391,6 +392,7 @@ class RoadmapService {
 
   /**
    * Идемпотентная запись попытки: повтор с тем же sessionId не меняет метрики.
+   * Работает без MongoDB-транзакций (совместимо со standalone).
    */
   async recordTestSubmitted(input: {
     userId: string;
@@ -422,88 +424,71 @@ class RoadmapService {
       };
     }
 
-    const session = await mongoose.startSession();
     try {
-      try {
-      await session.withTransaction(async () => {
-        await RoadmapAttempt.create(
-          [
-            {
-              userId,
-              sessionId,
-              subjectId,
-              nodeId,
-              scorePercent,
-              submittedAt
-            }
-          ],
-          { session }
-        );
-
-        let progressDoc = await UserRoadmapProgress.findOne({ userId, subjectId }).session(session);
-        const canonicalNodes = canonicalDoc.nodes;
-        if (!progressDoc) {
-          const merged = this.mergeProgressWithCanonical(canonicalNodes, []);
-          progressDoc = new UserRoadmapProgress({
-            userId,
-            subjectId,
-            canonicalVersion: canonicalDoc.version,
-            nodes: merged
-          });
-        } else {
-          progressDoc.nodes = this.mergeProgressWithCanonical(canonicalNodes, progressDoc.nodes);
-          progressDoc.canonicalVersion = canonicalDoc.version;
-        }
-
-        const map = progressMap(progressDoc.nodes);
-        const cur = map.get(nodeId) ?? defaultProgress(nodeId);
-        const attempts = cur.attemptsCount + 1;
-        const sumScores = cur.sumScores + scorePercent;
-        const avgScore = sumScores / attempts;
-        const bestScore = Math.max(cur.bestScore, scorePercent);
-        let progressStatus: RoadmapProgressStatus = 'in_progress';
-        if (isMasteredByBestScore(bestScore)) {
-          progressStatus = 'mastered';
-        } else if (attempts > 0) {
-          progressStatus = 'in_progress';
-        }
-
-        const updated: IUserRoadmapNodeProgress = {
-          ...cur,
-          attemptsCount: attempts,
-          lastAttemptAt: submittedAt,
-          bestScore,
-          avgScore,
-          sumScores,
-          masteryScore: scorePercentToMasteryScore(bestScore),
-          progressStatus
-        };
-
-        const nextNodes = progressDoc.nodes.filter((n) => n.nodeId !== nodeId);
-        nextNodes.push(updated);
-        progressDoc.nodes = this.mergeProgressWithCanonical(
-          canonicalNodes,
-          nextNodes
-        );
-
-        await progressDoc.save({ session });
+      await RoadmapAttempt.create({
+        userId,
+        sessionId,
+        subjectId,
+        nodeId,
+        scorePercent,
+        submittedAt
       });
-      } catch (err: unknown) {
-        const code = (err as { code?: number })?.code;
-        if (code === 11000) {
-          const snap = await this.getPersonalSnapshot(userId, subjectId);
-          return {
-            idempotent: true as const,
-            updatedNodesDelta: [] as { nodeId: string; progressStatus: RoadmapProgressStatus }[],
-            nextRecommended: snap.nextRecommended,
-            topRecommendations: snap.topRecommendations
-          };
-        }
-        throw err;
+    } catch (err: unknown) {
+      const code = (err as { code?: number })?.code;
+      if (code === 11000) {
+        const snap = await this.getPersonalSnapshot(userId, subjectId);
+        return {
+          idempotent: true as const,
+          updatedNodesDelta: [] as { nodeId: string; progressStatus: RoadmapProgressStatus }[],
+          nextRecommended: snap.nextRecommended,
+          topRecommendations: snap.topRecommendations
+        };
       }
-    } finally {
-      await session.endSession();
+      throw err;
     }
+
+    const canonicalNodes = canonicalDoc.nodes;
+    const existingProgress = await UserRoadmapProgress.findOne({ userId, subjectId }).lean();
+    const existingNodes: IUserRoadmapNodeProgress[] = existingProgress?.nodes ?? [];
+    const merged = this.mergeProgressWithCanonical(canonicalNodes, existingNodes);
+
+    const pMap = progressMap(merged);
+    const cur = pMap.get(nodeId) ?? defaultProgress(nodeId);
+    const attempts = cur.attemptsCount + 1;
+    const sumScores = cur.sumScores + scorePercent;
+    const avgScore = sumScores / attempts;
+    const bestScore = Math.max(cur.bestScore, scorePercent);
+    let progressStatus: RoadmapProgressStatus = 'in_progress';
+    if (isMasteredByBestScore(bestScore)) {
+      progressStatus = 'mastered';
+    }
+
+    const updated: IUserRoadmapNodeProgress = {
+      nodeId,
+      attemptsCount: attempts,
+      lastAttemptAt: submittedAt,
+      bestScore,
+      avgScore,
+      sumScores,
+      masteryScore: scorePercentToMasteryScore(bestScore),
+      progressStatus
+    };
+
+    const finalNodes = merged.filter((n) => n.nodeId !== nodeId);
+    finalNodes.push(updated);
+    const orderedNodes = this.mergeProgressWithCanonical(canonicalNodes, finalNodes);
+
+    await UserRoadmapProgress.findOneAndUpdate(
+      { userId, subjectId },
+      {
+        $set: {
+          canonicalVersion: canonicalDoc.version,
+          nodes: orderedNodes
+        },
+        $setOnInsert: { userId, subjectId }
+      },
+      { upsert: true, new: true }
+    ).lean();
 
     const snap = await this.getPersonalSnapshot(userId, subjectId);
     const delta = [{ nodeId, progressStatus: snap.nodes.find((n) => n.nodeId === nodeId)!.progressStatus }];

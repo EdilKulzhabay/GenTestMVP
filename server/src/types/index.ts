@@ -212,6 +212,8 @@ export interface IGenerateTestDTO {
   bookId: string;
   chapterId?: string;
   fullBook?: boolean;
+  /** Тема-фокус для генерации (из roadmap-узла). AI сфокусирует вопросы на этой теме */
+  topicFocus?: string;
 }
 
 export interface ISubmitTestDTO {
@@ -243,6 +245,8 @@ export interface IContentForAI {
     contentLanguage?: string;
     /** Заголовки глав по порядку (оглавление) */
     chapterTitles?: string[];
+    /** Узел roadmap — AI фокусирует вопросы на этой теме */
+    topicFocus?: string;
   };
 }
 

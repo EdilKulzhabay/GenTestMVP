@@ -69,6 +69,36 @@ export const clearPendingResultReturn = (): void => {
   sessionStorage.removeItem(PENDING_RESULT_RETURN_KEY);
 };
 
+const ROADMAP_CONTEXT_KEY = 'gen-test:roadmap-context';
+
+export interface RoadmapTestContext {
+  subjectId: string;
+  nodeId: string;
+  nodeTitle: string;
+  sessionId: string;
+  bookId: string;
+  chapterId?: string;
+  fullBook?: boolean;
+}
+
+export const saveRoadmapContext = (ctx: RoadmapTestContext): void => {
+  sessionStorage.setItem(ROADMAP_CONTEXT_KEY, JSON.stringify(ctx));
+};
+
+export const getRoadmapContext = (): RoadmapTestContext | null => {
+  const raw = sessionStorage.getItem(ROADMAP_CONTEXT_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as RoadmapTestContext;
+  } catch {
+    return null;
+  }
+};
+
+export const clearRoadmapContext = (): void => {
+  sessionStorage.removeItem(ROADMAP_CONTEXT_KEY);
+};
+
 const GUEST_TEST_SUBMISSION_KEY = 'gen-test:guest-submission';
 
 export interface GuestTestSubmission {

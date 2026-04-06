@@ -8,7 +8,7 @@ import { ErrorMessage } from '../../components/ui/ErrorMessage';
 import { Button } from '../../components/ui/Button';
 import { TestGenerationLoading, TestGenerationState } from '../../components/TestGenerationLoading';
 import { getApiErrorMessage } from '../../utils/error';
-import { saveCurrentTest } from '../../utils/session';
+import { saveCurrentTest, saveRoadmapContext, RoadmapTestContext } from '../../utils/session';
 import { useGuestMode } from '../../hooks/useGuestMode';
 
 interface LocationState {
@@ -16,6 +16,9 @@ interface LocationState {
   bookId?: string;
   chapterId?: string;
   fullBook?: boolean;
+  roadmapNodeId?: string;
+  roadmapNodeTitle?: string;
+  roadmapSessionId?: string;
 }
 
 export const TestStartPage: React.FC = () => {
@@ -27,6 +30,9 @@ export const TestStartPage: React.FC = () => {
   const bookId = state?.bookId;
   const chapterId = state?.chapterId;
   const fullBook = state?.fullBook ?? false;
+  const roadmapNodeId = state?.roadmapNodeId;
+  const roadmapNodeTitle = state?.roadmapNodeTitle;
+  const roadmapSessionId = state?.roadmapSessionId;
 
   const [subject, setSubject] = useState<Subject | null>(null);
   const [loading, setLoading] = useState(true);
@@ -87,11 +93,25 @@ export const TestStartPage: React.FC = () => {
         subjectId,
         bookId,
         chapterId: fullBook ? undefined : chapterId,
-        fullBook
+        fullBook,
+        ...(roadmapNodeTitle ? { topicFocus: roadmapNodeTitle } : {})
       });
       clearTimeout(t);
       setGenerateState('ready');
       saveCurrentTest(test);
+
+      if (roadmapNodeId && roadmapSessionId && subjectId && bookId) {
+        saveRoadmapContext({
+          subjectId,
+          nodeId: roadmapNodeId,
+          nodeTitle: roadmapNodeTitle || roadmapNodeId,
+          sessionId: roadmapSessionId,
+          bookId,
+          chapterId,
+          fullBook
+        });
+      }
+
       setTimeout(() => navigate(`${basePath}/test`), 400);
     } catch (err) {
       clearTimeout(t);
@@ -130,7 +150,11 @@ export const TestStartPage: React.FC = () => {
       <div className="text-sm text-slate-600">
         <p>Предмет: {subject?.title}</p>
         <p>Книга: {book?.title}</p>
-        <p>Режим: {fullBook ? 'По всей книге' : `Глава: ${chapter?.title}`}</p>
+        {roadmapNodeTitle ? (
+          <p>Тема: <span className="font-medium text-slate-800">{roadmapNodeTitle}</span></p>
+        ) : (
+          <p>Режим: {fullBook ? 'По всей книге' : `Глава: ${chapter?.title}`}</p>
+        )}
       </div>
       {error ? <ErrorMessage message={error} /> : null}
       <Button onClick={handleGenerate}>Начать тест</Button>
