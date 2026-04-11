@@ -13,9 +13,12 @@ export interface CanonicalRoadmapSourceMeta {
 export interface CanonicalRoadmapResponse {
   subjectId: string;
   version: number;
+  /** Описание карты целиком: цели, охват курса */
+  description?: string;
   nodes: Array<{
     nodeId: string;
     title: string;
+    description?: string;
     prerequisites: string[];
     metadata?: Record<string, unknown>;
   }>;
@@ -26,6 +29,7 @@ export interface CanonicalRoadmapResponse {
 export interface PersonalRoadmapNode {
   nodeId: string;
   title: string;
+  description?: string;
   prerequisites: string[];
   metadata?: Record<string, unknown>;
   availability: RoadmapAvailability;

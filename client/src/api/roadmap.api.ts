@@ -50,6 +50,7 @@ export const roadmapApi = {
   async upsertCanonical(body: {
     subjectId: string;
     version?: number;
+    description?: string;
     nodes: CanonicalRoadmapResponse['nodes'];
   }): Promise<CanonicalRoadmapResponse> {
     const { data } = await axiosInstance.post<ApiResponse<CanonicalRoadmapResponse>>(

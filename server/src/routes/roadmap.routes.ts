@@ -47,9 +47,11 @@ router.post(
   [
     body('subjectId').isMongoId(),
     body('version').optional().isInt({ min: 1 }),
+    body('description').optional().isString().isLength({ max: 8000 }),
     body('nodes').isArray({ min: 1 }),
     body('nodes.*.nodeId').trim().notEmpty(),
     body('nodes.*.title').trim().notEmpty(),
+    body('nodes.*.description').optional().isString().isLength({ max: 8000 }),
     body('nodes.*.prerequisites').optional().isArray()
   ],
   validate,

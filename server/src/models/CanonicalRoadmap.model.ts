@@ -17,6 +17,7 @@ const CanonicalNodeSchema = new Schema<ICanonicalRoadmapNode>(
   {
     nodeId: { type: String, required: true, trim: true },
     title: { type: String, required: true, trim: true },
+    description: { type: String, trim: true, maxlength: 8000 },
     prerequisites: [{ type: String, trim: true }],
     metadata: { type: Schema.Types.Mixed }
   },
@@ -35,6 +36,7 @@ const CanonicalRoadmapSchema = new Schema<Doc>(
       unique: true
     },
     version: { type: Number, required: true, default: 1, min: 1 },
+    description: { type: String, trim: true, maxlength: 8000 },
     nodes: { type: [CanonicalNodeSchema], required: true, default: [] },
     sourceMeta: { type: SourceMetaSchema, required: false }
   },

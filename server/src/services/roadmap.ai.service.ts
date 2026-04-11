@@ -60,7 +60,8 @@ class RoadmapAIService {
       'Ты методист. По приведённому фрагменту учебника построй учебный roadmap — граф тем (узлов), отражающий реальную структуру материала.',
       'Требования:',
       '- Верни ТОЛЬКО строгий JSON без Markdown.',
-      '- Формат: { "nodes": [ { "nodeId": "латиница-цифры-дефисы", "title": "краткое название темы", "prerequisites": ["nodeId", ...], "metadata": { } } ] }',
+      '- Формат: { "nodes": [ { "nodeId": "латиница-цифры-дефисы", "title": "краткое название темы", "description": "2-4 предложения: о чём тема, что ученик должен понять", "prerequisites": ["nodeId", ...], "metadata": { } } ] }',
+      '- Поле description обязательно для каждого узла (коротко, по делу).',
       '- nodeId: уникальные строки, латиница/цифры/дефисы, без пробелов.',
       '- prerequisites: логика AND — все перечисленные узлы должны быть пройдены до текущего. Пустой массив = можно начинать с этого узла.',
       '- Связи должны быть ациклическими (без циклов).',
@@ -120,6 +121,9 @@ class RoadmapAIService {
     const nodes: ICanonicalRoadmapNode[] = nodesRaw.map((n: any) => ({
       nodeId: String(n.nodeId).trim(),
       title: String(n.title).trim(),
+      ...(typeof n.description === 'string' && n.description.trim()
+        ? { description: String(n.description).trim() }
+        : {}),
       prerequisites: Array.isArray(n.prerequisites) ? n.prerequisites.map(String) : [],
       metadata:
         n.metadata && typeof n.metadata === 'object' && !Array.isArray(n.metadata)

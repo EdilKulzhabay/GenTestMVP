@@ -124,7 +124,7 @@ class RoadmapService {
 
     const text = await fs.readFile(filePath, 'utf8');
     const parsed: unknown = JSON.parse(text);
-    const { nodes, version } = parseCanonicalNodesFromPayload(parsed);
+    const { nodes, version, description } = parseCanonicalNodesFromPayload(parsed);
     assertValidCanonicalNodes(nodes);
 
     const subjectObjectId = new mongoose.Types.ObjectId(subjectId);
@@ -137,7 +137,8 @@ class RoadmapService {
           $set: {
             subjectId: subjectObjectId,
             version: ver,
-            nodes
+            nodes,
+            ...(description ? { description } : {})
           },
           $unset: { sourceMeta: 1 }
         },
@@ -159,12 +160,17 @@ class RoadmapService {
       throw AppError.notFound('Canonical roadmap not configured for this subject');
     }
 
+    const roadmapDescription =
+      'description' in doc && typeof doc.description === 'string' ? doc.description.trim() : '';
+
     return {
       subjectId: doc.subjectId.toString(),
       version: doc.version,
+      ...(roadmapDescription ? { description: roadmapDescription } : {}),
       nodes: doc.nodes.map((n) => ({
         nodeId: n.nodeId,
         title: n.title,
+        ...(n.description?.trim() ? { description: n.description.trim() } : {}),
         prerequisites: n.prerequisites || [],
         metadata: n.metadata
       })),
@@ -229,6 +235,7 @@ class RoadmapService {
       return {
         nodeId: cn.nodeId,
         title: cn.title,
+        ...(cn.description?.trim() ? { description: cn.description.trim() } : {}),
         prerequisites: cn.prerequisites || [],
         metadata: cn.metadata,
         availability,

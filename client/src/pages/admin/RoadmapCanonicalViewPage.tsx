@@ -6,6 +6,7 @@ import { CanonicalRoadmapResponse } from '../../types/roadmap.types';
 import { Loader } from '../../components/ui/Loader';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
 import { getApiErrorMessage } from '../../utils/error';
+import { RoadmapTreeView } from '../../components/roadmap/RoadmapTreeView';
 
 export const RoadmapCanonicalViewPage: React.FC = () => {
   const { subjectId } = useParams<{ subjectId: string }>();
@@ -82,6 +83,11 @@ export const RoadmapCanonicalViewPage: React.FC = () => {
             <span className="font-medium text-slate-800">Версия:</span> {roadmap.version}
             <span className="mx-2 text-slate-300">·</span>
             <span className="font-medium text-slate-800">Узлов:</span> {roadmap.nodes.length}
+            {roadmap.description ? (
+              <p className="mt-2 border-t border-slate-100 pt-2 text-sm leading-relaxed text-slate-700">
+                {roadmap.description}
+              </p>
+            ) : null}
             {roadmap.sourceMeta?.bookTitle && (
               <p className="mt-2 border-t border-slate-100 pt-2 text-xs text-slate-500">
                 <span className="font-medium text-slate-700">Источник: </span>
@@ -96,47 +102,10 @@ export const RoadmapCanonicalViewPage: React.FC = () => {
             )}
           </div>
 
-          <div className="space-y-3">
-            {roadmap.nodes.map((node, idx) => (
-              <div
-                key={node.nodeId}
-                className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
-              >
-                <div className="flex flex-wrap items-baseline gap-2">
-                  <span className="text-xs font-medium text-slate-400">{idx + 1}</span>
-                  <h2 className="text-base font-semibold text-slate-900">{node.title}</h2>
-                </div>
-                <p className="mt-1 font-mono text-xs text-slate-500">{node.nodeId}</p>
-                <div className="mt-3">
-                  <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                    Требует пройти
-                  </p>
-                  {node.prerequisites.length === 0 ? (
-                    <p className="mt-1 text-sm text-emerald-700">Стартовый узел (нет зависимостей)</p>
-                  ) : (
-                    <ul className="mt-1 flex flex-wrap gap-2">
-                      {node.prerequisites.map((p) => (
-                        <li
-                          key={p}
-                          className="rounded-md bg-slate-100 px-2 py-1 font-mono text-xs text-slate-700"
-                        >
-                          {p}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                {node.metadata && Object.keys(node.metadata).length > 0 && (
-                  <details className="mt-3 text-xs text-slate-500">
-                    <summary className="cursor-pointer text-slate-600">Метаданные</summary>
-                    <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-50 p-2">
-                      {JSON.stringify(node.metadata, null, 2)}
-                    </pre>
-                  </details>
-                )}
-              </div>
-            ))}
-          </div>
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+            Дерево узлов
+          </p>
+          <RoadmapTreeView mode="canonical" nodes={roadmap.nodes} />
         </>
       )}
     </div>

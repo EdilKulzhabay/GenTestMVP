@@ -6,6 +6,8 @@ export type RoadmapProgressStatus = 'not_started' | 'in_progress' | 'mastered';
 export interface ICanonicalRoadmapNode {
   nodeId: string;
   title: string;
+  /** Подробное описание темы узла для UI и методистов */
+  description?: string;
   prerequisites: string[];
   metadata?: Record<string, unknown>;
 }
@@ -24,6 +26,8 @@ export interface ICanonicalRoadmap {
   _id?: Types.ObjectId;
   subjectId: Types.ObjectId;
   version: number;
+  /** О чём карта в целом: цели, охват, связь с учебником */
+  description?: string;
   nodes: ICanonicalRoadmapNode[];
   sourceMeta?: ICanonicalRoadmapSourceMeta;
   createdAt?: Date;
@@ -65,6 +69,7 @@ export interface IRoadmapAttempt {
 export interface IPersonalRoadmapNodeView {
   nodeId: string;
   title: string;
+  description?: string;
   prerequisites: string[];
   metadata?: Record<string, unknown>;
   availability: RoadmapAvailability;

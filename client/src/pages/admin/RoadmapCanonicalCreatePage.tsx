@@ -14,28 +14,39 @@ import { getApiErrorMessage } from '../../utils/error';
 /** Шаблон статичного canonical roadmap (Notion: Sprint 0, JSON со структурой знаний). */
 const CANONICAL_JSON_EXAMPLE = `{
   "version": 1,
+  "description": "Кратко: для какого курса карта и как по ней двигаться.",
   "nodes": [
     {
       "nodeId": "start_topic",
       "title": "Вводная тема",
+      "description": "Зачем эта тема и какие понятия вынесет ученик.",
       "prerequisites": []
     },
     {
       "nodeId": "next_topic",
       "title": "Тема с зависимостью",
+      "description": "Продолжение после вводной: связь с предыдущим узлом.",
       "prerequisites": ["start_topic"]
     }
   ]
 }`;
 
-function parseCanonicalJsonText(text: string): { version?: number; nodes: unknown[] } {
+function parseCanonicalJsonText(text: string): {
+  version?: number;
+  description?: string;
+  nodes: unknown[];
+} {
   const raw = JSON.parse(text) as unknown;
   if (Array.isArray(raw)) {
     return { nodes: raw };
   }
   if (raw && typeof raw === 'object' && 'nodes' in raw && Array.isArray((raw as { nodes: unknown }).nodes)) {
-    const o = raw as { version?: number; nodes: unknown[] };
-    return { version: typeof o.version === 'number' ? o.version : undefined, nodes: o.nodes };
+    const o = raw as { version?: number; description?: string; nodes: unknown[] };
+    return {
+      version: typeof o.version === 'number' ? o.version : undefined,
+      description: typeof o.description === 'string' ? o.description : undefined,
+      nodes: o.nodes
+    };
   }
   throw new Error('Ожидается объект с полем "nodes" или массив узлов');
 }
@@ -102,10 +113,11 @@ export const RoadmapCanonicalCreatePage: React.FC = () => {
     }
     setSubmittingJson(true);
     try {
-      const { version, nodes } = parseCanonicalJsonText(jsonText.trim());
+      const { version, nodes, description } = parseCanonicalJsonText(jsonText.trim());
       await roadmapApi.upsertCanonical({
         subjectId,
         ...(version !== undefined ? { version } : {}),
+        ...(description?.trim() ? { description: description.trim() } : {}),
         nodes: nodes as CanonicalRoadmapResponse['nodes']
       });
       setSuccessMsg('Статичный canonical roadmap сохранён в базе (как описано в продуктовой спецификации: JSON → хранение).');

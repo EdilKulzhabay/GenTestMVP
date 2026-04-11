@@ -131,8 +131,17 @@ class RoadmapController {
     const subject = await Subject.findById(subjectId);
     if (!subject) throw AppError.notFound('Subject not found');
 
-    const { nodes: mapped, version: parsedVersion } = parseCanonicalNodesFromPayload(req.body);
+    const { nodes: mapped, version: parsedVersion, description: parsedDescription } =
+      parseCanonicalNodesFromPayload(req.body);
     assertValidCanonicalNodes(mapped);
+
+    const bodyDescription =
+      typeof req.body === 'object' &&
+      req.body !== null &&
+      typeof (req.body as { description?: unknown }).description === 'string'
+        ? String((req.body as { description: string }).description).trim()
+        : '';
+    const roadmapDescription = bodyDescription || parsedDescription;
 
     const existing = await CanonicalRoadmap.findOne({ subjectId });
     const nextVersion =
@@ -148,14 +157,25 @@ class RoadmapController {
         $set: {
           subjectId,
           version: nextVersion,
-          nodes: mapped
+          nodes: mapped,
+          ...(roadmapDescription ? { description: roadmapDescription } : {})
         },
         $unset: { sourceMeta: 1 }
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    success(res, { subjectId: doc!.subjectId, version: doc!.version, nodes: doc!.nodes }, 'Canonical roadmap saved', 201);
+    success(
+      res,
+      {
+        subjectId: doc!.subjectId,
+        version: doc!.version,
+        nodes: doc!.nodes,
+        ...(doc!.description?.trim() ? { description: doc!.description.trim() } : {})
+      },
+      'Canonical roadmap saved',
+      201
+    );
   }
 }
 
