@@ -34,15 +34,70 @@ export interface ICanonicalRoadmap {
   updatedAt?: Date;
 }
 
+/** Прогресс по узлу в БД (для расчёта освоения и «урок прочитан») */
 export interface IUserRoadmapNodeProgress {
   nodeId: string;
-  attemptsCount: number;
-  lastAttemptAt?: Date;
+  /** Освоено: обычный тест ≥70% (best) или пробный ≥80% */
+  mastered: boolean;
+  /** Лучший балл по узлу (0..100), служебное поле */
   bestScore: number;
-  avgScore: number;
-  sumScores: number;
-  masteryScore: number;
-  progressStatus: RoadmapProgressStatus;
+  /** Сколько раз подряд сдали тест по узлу карты < ROADMAP_KNOWLEDGE_TEST_PASS_PERCENT; сбрасывается при успехе или «Освоил» */
+  lowScoreFailCount?: number;
+  /** Отметка «урок прочитан» (страница теории по узлу) */
+  lessonReadAt?: Date;
+}
+
+/** Видео к уроку узла (в canonical metadata.lesson или в ответе API) */
+export interface IRoadmapLessonVideo {
+  url: string;
+  durationSec?: number;
+  posterUrl?: string;
+}
+
+/**
+ * Контент урока в canonical-узле: metadata.lesson
+ * summary кэшируется после генерации ИИ.
+ */
+export interface IRoadmapLessonMeta {
+  lessonId?: string;
+  summary?: string;
+  content?: string;
+  /** Если не указано — считаем markdown */
+  contentFormat?: 'markdown' | 'html';
+  video?: IRoadmapLessonVideo | null;
+}
+
+/** Ответ GET …/lesson — один текстовый формат на всё API (summary + content) */
+export interface IRoadmapLessonResponse {
+  nodeId: string;
+  lessonId: string;
+  title: string;
+  summary: string;
+  content: string;
+  /** Единый формат текста для summary и content */
+  contentFormat: 'markdown' | 'html';
+  /** @deprecated используйте contentFormat */
+  textFormat?: 'markdown' | 'html';
+  video: IRoadmapLessonVideo | null;
+  readCompletedAt: string | null;
+}
+
+/** Элемент списка предметов для bottom sheet (согласован с GET /roadmaps/personal) */
+export interface IRoadmapPickerSubjectItem {
+  subjectId: string;
+  title: string;
+  /** Вторая строка карточки (например описание предмета) */
+  subtitle?: string;
+  /** Есть canonical roadmap в системе */
+  roadmapConfigured: boolean;
+  /** Можно открыть personal roadmap (тоже true только при roadmapConfigured) */
+  isRoadmapAvailable: boolean;
+  /** 0..100, доля пройденных (mastered) узлов */
+  progressPercent: number;
+  /** Агрегат по узлам personal для карточки (не путать с progressStatus узла в /personal) */
+  progressStatus: 'not_started' | 'in_progress' | 'completed';
+  nodesTotal: number;
+  nodesMastered: number;
 }
 
 export interface IUserRoadmapProgress {
@@ -73,15 +128,23 @@ export interface IPersonalRoadmapNodeView {
   prerequisites: string[];
   metadata?: Record<string, unknown>;
   availability: RoadmapAvailability;
-  progressStatus: RoadmapProgressStatus;
-  attemptsCount: number;
-  lastAttemptAt?: string;
-  bestScore: number;
-  avgScore: number;
-  masteryScore: number;
+  /** Освоено (true/false) — единственное отличие персональной карты от canonical */
+  mastered: boolean;
+  /** Ссылка на страницу главы (относительный путь приложения) */
+  chapterUrl?: string;
+  bookId?: string;
+  chapterId?: string;
+  /** Тема (узел карты = тема, не глава) */
+  topicId?: string;
+  /** Id сохранённого теста по главе, если есть */
+  testId?: string;
   isRecommended: boolean;
   recommendedPriority: number;
   recommendedReason: string;
+  /** Сколько неудачных попыток (балл < 80%) по тесту этого узла */
+  lowScoreFailCount: number;
+  /** Нельзя начать тест с карты, пока не пройдёте материал и не нажмёте «Освоил» */
+  knowledgeMapTestBlocked: boolean;
   /** Краткая ИИ-подсказка по узлу (если запрошен слой AI) */
   aiHint?: string;
 }

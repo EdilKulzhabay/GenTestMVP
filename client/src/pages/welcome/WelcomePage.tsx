@@ -48,6 +48,12 @@ export const WelcomePage: React.FC = () => {
               Попробовать бесплатно
             </Link>
             <p className="text-xs text-slate-400">Без регистрации — пройдите пробный тест прямо сейчас</p>
+            <Link
+              to="/guest/trial"
+              className="flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
+            >
+              Пробное тестирование ЕНТ (5 блоков)
+            </Link>
           </div>
 
           <div className="relative">

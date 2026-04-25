@@ -3,8 +3,10 @@ import { ApiResponse } from '../types/api.types';
 import { Subject } from '../types/subject.types';
 
 export const subjectApi = {
-  async getSubjects(): Promise<Subject[]> {
-    const { data } = await axiosInstance.get<ApiResponse<Subject[]>>('/subjects');
+  async getSubjects(options?: { subjectKind?: 'main' | 'profile' }): Promise<Subject[]> {
+    const { data } = await axiosInstance.get<ApiResponse<Subject[]>>('/subjects', {
+      params: options?.subjectKind ? { subjectKind: options.subjectKind } : undefined
+    });
     return data.data;
   },
 
@@ -13,7 +15,11 @@ export const subjectApi = {
     return data.data;
   },
 
-  async createSubject(payload: { title: string; description?: string }): Promise<Subject> {
+  async createSubject(payload: {
+    title: string;
+    description?: string;
+    subjectKind?: 'main' | 'profile';
+  }): Promise<Subject> {
     const { data } = await axiosInstance.post<ApiResponse<Subject>>('/subjects', payload);
     return data.data;
   },
@@ -84,7 +90,7 @@ export const subjectApi = {
     return data.data;
   },
 
-  async updateSubject(id: string, payload: { title?: string; description?: string }): Promise<Subject> {
+  async updateSubject(id: string, payload: { title?: string; description?: string; subjectKind?: 'main' | 'profile' }): Promise<Subject> {
     const { data } = await axiosInstance.patch<ApiResponse<Subject>>(`/subjects/${id}`, payload);
     return data.data;
   },

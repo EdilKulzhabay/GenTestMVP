@@ -1,0 +1,90 @@
+## 📌 Kahoot-режим (Live + Solo): технический анализ (MVP)
+
+- Кратко: что делаем
+    - Два режима на одном ядре: **Solo Kahoot** (Daily pack + лидерборды Global/City) и **Live Kahoot** (комнаты, PIN, хост).
+    - Таймер: **15 сек**.
+    - Скоринг (и Solo, и Live): **скорость + правильность**. Правильный ответ: $Score = 1000 times (0.3 + 0.7 times (remaining/15))$, неправильный/не успел: 0.
+    - Solo ranked: **1 попытка в день** на daily pack; остальные попытки — practice (очки показываем, но в рейтинг не идут).
+    - Только с логином.
+- Продуктовые правила (чтобы реалтайм и лидерборды были честными)
+    - **Solo Kahoot**
+        - Основной режим: Daily pack (фиксированный набор на день).
+        - Рейтинг: Today / Week.
+        - Скоуп: Global / City.
+        - В рейтинг идёт только 1 ranked attempt в день (dailyPackId + userId уникально).
+    - **Live Kahoot**
+        - Хост выбирает предмет/тему; UI выбора тем показывает сначала завершённые.
+        - Без «проектора» на MVP: вопрос и варианты видны каждому игроку на телефоне.
+- Границы ответственности: Backend vs Frontend
+    - Backend (Node)
+        - Единственный источник истины по игре: фазы, дедлайны, очки, принимаемость ответа.
+        - Оркестрация комнат: создание комнаты, PIN, роли (host/player), подключение/отключение.
+        - Состояние игры: FSM фаз (lobby → countdown → question_active → reveal → leaderboard → finished).
+        - Валидация ответов: «в активной фазе», «до endAt», «1 ответ на вопрос».
+        - Подсчёт очков (server-authoritative).
+        - Формирование daily pack (seed/packId), ограничения ranked attempt.
+        - Сохранение результатов (итоговый скор + мета), расчёт лидербордов.
+        - Реалтайм доставка событий (WebSocket/[Socket.IO](http://Socket.IO)), поддержка reconnect.
+    - Frontend (React + Redux + MUI)
+        - UI и UX: Join, Lobby, Question, Reveal, Leaderboard, Finish, Host screens.
+        - Локальный derived state: отображение таймера, блокировка кнопок, показ статусов отправки.
+        - Отправка команд: join room, submit answer, host start/next/end.
+        - Обработка reconnect: запрос snapshot/синхронизация состояния.
+        - Никакой «истины» по очкам/таймингу на клиенте (клиент не решает, успел ли игрок).
+- Backend: рекомендуемая структура модулей (MVP)
+    - WS Gateway ([Socket.IO](http://Socket.IO))
+        - Auth handshake (только с логином).
+        - Namespaces/rooms: room:{roomId} + роль.
+        - Ack для критичных команд (submit answer / host commands).
+    - Room Service
+        - createRoom(settings) → roomId, pin
+        - joinRoom(roomId, userId, role)
+        - getSnapshot(roomId)
+    - Game Engine (доменный слой, без сетевых зависимостей)
+        - State machine, transitions, timers
+        - Scoring
+        - Answer validation
+    - Daily Pack Service
+        - generateDailyPack(date, subject/topic, seed) → dailyPackId
+        - Должен выдавать воспроизводимый набор вопросов по seed.
+    - Leaderboard Service
+        - upsertAttemptResult(userId, dailyPackId, attemptType, finalScore, correctCount?, city, createdAt)
+        - queryLeaderboard(period, scope, city?, dailyPackId)
+    - Storage
+        - MVP: результаты в БД; состояние live-комнат можно держать в памяти одного Node-инстанса.
+        - Важно: сразу заложить протокол так, чтобы потом можно было вынести room-state в Redis.
+- Frontend: рекомендуемая архитектура (React + Redux)
+    - Realtime client (singleton)
+        - connect/disconnect, auto-reconnect
+        - on(event) → dispatch
+        - serverTimeOffset (для таймера)
+    - Redux slices
+        - liveSessionSlice: connectionStatus, roomId, role, serverTimeOffsetMs
+        - liveGameSlice: phase, question, endAt, myAnswerStatus, scores, leaderboard
+        - soloDailySlice: dailyPack meta, attempt status (ranked used/not), results
+    - Таймер на фронте
+        - timeLeft = endAt - ([Date.now](http://Date.now)() + serverTimeOffset)
+        - Фронт не «закрывает» вопрос, только блокирует UI; сервер решает финально.
+- Реалтайм протокол (минимальный набор событий)
+    - ROOM_SNAPSHOT { revision, phase, settings, currentQuestion?, endAt?, leaderboard?, participantsCount }
+    - QUESTION_STARTED { revision, questionId, index, text, options, endAt }
+    - ANSWER_ACK { revision, accepted, receivedAt }
+    - QUESTION_REVEAL { revision, correctOptionId, explanation, stats? }
+    - LEADERBOARD_UPDATED { revision, top10, me: { rank, score } }
+    - GAME_FINISHED { revision, finalLeaderboard, summary }
+    
+    Требования:
+    
+    - Во всех событиях есть **revision** (монотонно растёт), чтобы игнорировать дубли при reconnect.
+    - При reconnect клиент получает ROOM_SNAPSHOT и продолжает с актуального состояния.
+- Данные/метрики, которые стоит сохранять (MVP)
+    - Solo attempt
+        - userId, dailyPackId, attemptType (ranked/practice), finalScore, correctCount (рекомендуется), answeredCount (рекомендуется), city, createdAt
+    - Live session (минимум)
+        - roomId, hostId, settings, participantsCount, startedAt, finishedAt
+        - (опционально) финальные score участников
+- Ограничения MVP (чтобы система выдержала нагрузку)
+    - Сервер не шлёт «тик» таймера каждую секунду; только endAt.
+    - Лидерборд в live: обновлять 1 раз между вопросами (top-10 + me), не после каждого ответа.
+    - Вопросы не генерить LLM в момент live-сессии (только кэш/предгенерация).
+    - Один Node-инстанс + in-memory room-state достаточно для MVP (ориентир: ~100 комнат × ~30 игроков при лёгких payload).

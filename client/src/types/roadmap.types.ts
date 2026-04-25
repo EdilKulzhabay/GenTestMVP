@@ -1,5 +1,4 @@
 export type RoadmapAvailability = 'locked' | 'available';
-export type RoadmapProgressStatus = 'not_started' | 'in_progress' | 'mastered';
 
 export interface CanonicalRoadmapSourceMeta {
   bookId?: string;
@@ -10,19 +9,24 @@ export interface CanonicalRoadmapSourceMeta {
   contentLanguage?: string;
 }
 
+export interface CanonicalRoadmapNodeDto {
+  nodeId: string;
+  title: string;
+  description?: string;
+  prerequisites: string[];
+  metadata?: Record<string, unknown>;
+  chapterUrl?: string;
+  bookId?: string;
+  chapterId?: string;
+  topicId?: string;
+  testId?: string;
+}
+
 export interface CanonicalRoadmapResponse {
   subjectId: string;
   version: number;
-  /** Описание карты целиком: цели, охват курса */
   description?: string;
-  nodes: Array<{
-    nodeId: string;
-    title: string;
-    description?: string;
-    prerequisites: string[];
-    metadata?: Record<string, unknown>;
-  }>;
-  /** Источник генерации карты (книга/глава) */
+  nodes: CanonicalRoadmapNodeDto[];
   sourceMeta?: CanonicalRoadmapSourceMeta;
 }
 
@@ -33,16 +37,17 @@ export interface PersonalRoadmapNode {
   prerequisites: string[];
   metadata?: Record<string, unknown>;
   availability: RoadmapAvailability;
-  progressStatus: RoadmapProgressStatus;
-  attemptsCount: number;
-  lastAttemptAt?: string;
-  bestScore: number;
-  avgScore: number;
-  masteryScore: number;
+  mastered: boolean;
+  chapterUrl?: string;
+  bookId?: string;
+  chapterId?: string;
+  topicId?: string;
+  testId?: string;
+  lowScoreFailCount: number;
+  knowledgeMapTestBlocked: boolean;
   isRecommended: boolean;
   recommendedPriority: number;
   recommendedReason: string;
-  /** Подсказка от ИИ (если запрошен слой ai=1) */
   aiHint?: string;
 }
 
@@ -57,7 +62,6 @@ export interface PersonalRoadmapResponse {
     reason: string;
     priority: number;
   }>;
-  /** Слой ИИ: коучинг и пояснение следующего шага (GET .../personal?ai=1) */
   ai?: {
     coachSummary: string;
     nextStepExplanation?: string;
@@ -66,7 +70,31 @@ export interface PersonalRoadmapResponse {
 
 export interface RoadmapTestSubmittedResponse {
   idempotent: boolean;
-  updatedNodesDelta: Array<{ nodeId: string; progressStatus: RoadmapProgressStatus }>;
+  updatedNodesDelta: Array<{ nodeId: string; mastered: boolean }>;
   nextRecommended: PersonalRoadmapResponse['nextRecommended'];
   topRecommendations: PersonalRoadmapResponse['topRecommendations'];
+}
+
+export interface RoadmapPickerSubjectItem {
+  subjectId: string;
+  title: string;
+  subtitle?: string;
+  roadmapConfigured: boolean;
+  isRoadmapAvailable: boolean;
+  progressPercent: number;
+  progressStatus: 'not_started' | 'in_progress' | 'completed';
+  nodesTotal: number;
+  nodesMastered: number;
+}
+
+export interface RoadmapLessonResponse {
+  nodeId: string;
+  lessonId: string;
+  title: string;
+  summary: string;
+  content: string;
+  contentFormat: 'markdown' | 'html';
+  textFormat?: 'markdown' | 'html';
+  video: { url: string; durationSec?: number; posterUrl?: string } | null;
+  readCompletedAt: string | null;
 }

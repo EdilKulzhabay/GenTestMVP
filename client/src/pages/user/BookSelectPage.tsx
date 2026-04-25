@@ -7,6 +7,8 @@ import { ErrorMessage } from '../../components/ui/ErrorMessage';
 import { Button } from '../../components/ui/Button';
 import { getApiErrorMessage } from '../../utils/error';
 import { useGuestMode } from '../../hooks/useGuestMode';
+import { useAuth } from '../../store/auth.store';
+import { isSubjectAllowedForLearner } from '../../utils/learnerSubjects.util';
 
 interface LocationState {
   subjectId?: string;
@@ -15,7 +17,8 @@ interface LocationState {
 export const BookSelectPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { basePath } = useGuestMode();
+  const { basePath, isGuest } = useGuestMode();
+  const { user } = useAuth();
   const state = location.state as LocationState | null;
   const subjectId = state?.subjectId;
 
@@ -65,6 +68,17 @@ export const BookSelectPage: React.FC = () => {
 
   if (error) {
     return <ErrorMessage message={error} />;
+  }
+
+  if (!isGuest && subject && !isSubjectAllowedForLearner(user, subject)) {
+    return (
+      <div className="card space-y-3">
+        <p className="text-sm text-slate-600">Этот предмет недоступен для вашего профиля.</p>
+        <Link to={`${basePath}/subjects`}>
+          <Button>К списку предметов</Button>
+        </Link>
+      </div>
+    );
   }
 
   if (!subject || subject.books.length === 0) {

@@ -6,8 +6,8 @@ export function assertValidCanonicalNodes(nodes: ICanonicalRoadmapNode[]): void 
   if (!nodes.length) {
     throw AppError.badRequest('Roadmap must contain at least one node');
   }
-  if (nodes.length > 80) {
-    throw AppError.badRequest('Too many nodes (max 80)');
+  if (nodes.length > 2000) {
+    throw AppError.badRequest('Too many nodes (max 2000)');
   }
 
   const ids = new Set<string>();

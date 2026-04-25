@@ -31,9 +31,10 @@ const UserAnswerSchema = new Schema<IUserAnswer>({
     type: String, 
     required: true 
   },
-  selectedOption: { 
-    type: String, 
-    required: true 
+  selectedOption: {
+    type: String,
+    required: true,
+    maxlength: 12000
   },
   isCorrect: { 
     type: Boolean, 
@@ -161,6 +162,12 @@ const UserSchema = new Schema<IUserDocument>({
     enum: Object.values(UserRole),
     default: UserRole.USER,
     required: true
+  },
+  /** Выбранная админом пара профильных предметов (после онбординга) */
+  profileSubjectPairId: {
+    type: Schema.Types.ObjectId,
+    ref: 'ProfileSubjectPair',
+    sparse: true
   },
   testHistory: [TestHistorySchema]
 }, { 

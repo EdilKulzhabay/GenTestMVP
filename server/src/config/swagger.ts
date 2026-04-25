@@ -22,8 +22,17 @@ const swaggerSpec = {
   tags: [
     { name: 'Auth', description: 'OTP (request-otp → verify-phone), Google OAuth, login, create-admin' },
     { name: 'Subjects', description: 'Предметы, книги, главы, темы, параграфы. CRUD (admin), публичный список' },
-    { name: 'Tests', description: 'Генерация (auth/guest), отправка ответов, привязка гостевого теста' },
-    { name: 'Roadmaps', description: 'Canonical roadmap (карта знаний), Personal roadmap (прогресс), рекомендации, обновление после теста' },
+    {
+      name: 'Tests',
+      description:
+        'Генерация (auth/guest) с `questionCount`, отправка ответов (`forTrial` для расчёта тем пробника), Solo (daily pack / practice), привязка гостевого теста'
+    },
+    {
+      name: 'Trial',
+      description:
+        'Пробное тестирование (ВНО): конфиг, план из 5 блоков, перенос результатов ≥ 80% по теме на personal roadmap (POST apply-results)'
+    },
+    { name: 'Roadmaps', description: 'Canonical roadmap (карта знаний), Personal roadmap (прогресс), рекомендации, урок, «освоил», чат' },
     { name: 'Users', description: 'Профиль, история тестов, статистика (требует auth)' },
     { name: 'System', description: 'Health check, отладка' }
   ],
@@ -278,6 +287,12 @@ const swaggerSpec = {
         }
       },
 
+      TestGenerationProfile: {
+        type: 'string',
+        enum: ['regular', 'ent'],
+        description:
+          'regular — классика (1–50 вопросов, одна правильная из 4); ent — смешанные форматы ЕНТ (10–120, кратно 10, батчами по 10)'
+      },
       GenerateTestRequest: {
         type: 'object',
         required: ['subjectId', 'bookId'],
@@ -285,9 +300,149 @@ const swaggerSpec = {
           subjectId: { type: 'string', description: 'MongoDB ObjectId предмета' },
           bookId: { type: 'string', description: 'MongoDB ObjectId книги' },
           chapterId: { type: 'string', description: 'MongoDB ObjectId главы (опционально, если fullBook=false)' },
-          fullBook: { type: 'boolean', default: false, description: 'true — тест по всей книге, false — по главе' }
+          fullBook: { type: 'boolean', default: false, description: 'true — тест по всей книге, false — по главе' },
+          testProfile: { $ref: '#/components/schemas/TestGenerationProfile' },
+          questionCount: {
+            type: 'integer',
+            minimum: 1,
+            description:
+              'Число вопросов: regular — 1..50, ent — 10..120 (кратно 10) или краткие батчи; по умолчанию сервер задаёт 10'
+          },
+          topicFocus: {
+            type: 'string',
+            description: 'Сфокусировать генерацию на теме (текст из карты/роадмап-узла)'
+          },
+          roadmapNodeId: {
+            type: 'string',
+            description: 'Узел карты знаний: проверка лимита неудачных попыток и фокус'
+          }
         },
-        example: { subjectId: '507f1f77bcf86cd799439011', bookId: '507f1f77bcf86cd799439012', chapterId: '507f1f77bcf86cd799439013', fullBook: false }
+        example: {
+          subjectId: '507f1f77bcf86cd799439011',
+          bookId: '507f1f77bcf86cd799439012',
+          chapterId: '507f1f77bcf86cd799439013',
+          fullBook: false,
+          testProfile: 'regular',
+          questionCount: 10
+        }
+      },
+      TrialTopicMasteryRow: {
+        type: 'object',
+        required: ['subjectId', 'nodeId', 'scorePercent'],
+        description: 'Тема (узел bookId:chapterId:topicId) с долей верных ≥ порога пробника (80%) в рамках одного теста',
+        properties: {
+          subjectId: { type: 'string' },
+          nodeId: { type: 'string', description: 'Идентификатор темы в canonical roadmap' },
+          scorePercent: { type: 'number', minimum: 0, maximum: 100, description: 'Процент верных по вопросам этой темы' }
+        }
+      },
+      TrialApplyResultsRequest: {
+        type: 'object',
+        required: ['results'],
+        properties: {
+          results: {
+            type: 'array',
+            minItems: 1,
+            items: {
+              type: 'object',
+              required: ['subjectId', 'nodeId', 'scorePercent'],
+              properties: {
+                subjectId: { type: 'string' },
+                nodeId: { type: 'string' },
+                scorePercent: { type: 'number', minimum: 0, maximum: 100, description: 'Порог «освоено» пробника: ≥ 80' }
+              }
+            }
+          }
+        }
+      },
+      TrialApplyResultsResponse: {
+        type: 'object',
+        properties: {
+          updatedNodeIds: { type: 'array', items: { type: 'string' }, description: 'Узлы, у которых обновлён прогресс' }
+        }
+      },
+      TrialConfigResponse: {
+        type: 'object',
+        description: 'GET /trial/config (optional auth — для pairedProfileIds)',
+        properties: {
+          mainSubjects: { type: 'array', items: { type: 'object', properties: { _id: { type: 'string' }, title: { type: 'string' } } } },
+          profileSubjects: { type: 'array', items: { type: 'object', properties: { _id: { type: 'string' }, title: { type: 'string' } } } },
+          pairedProfileIds: { type: 'array', items: { type: 'string' }, nullable: true },
+          trialMainsOk: { type: 'boolean', description: 'В БД заведены три main-предмета ВНО' },
+          entTrialInfo: {
+            type: 'object',
+            properties: {
+              mainBlocks: {
+                type: 'array',
+                items: { type: 'object', properties: { questionCount: { type: 'integer' }, blockLabel: { type: 'string' } } }
+              },
+              profileBlockPoints: { type: 'number' },
+              profileBlockQuestions: { type: 'number' }
+            }
+          }
+        }
+      },
+      TrialPlanResponse: {
+        type: 'object',
+        properties: {
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                subjectId: { type: 'string' },
+                subjectTitle: { type: 'string' },
+                bookId: { type: 'string' },
+                chapterId: { type: 'string' },
+                nodeId: { type: 'string' },
+                chapterTitle: { type: 'string' },
+                topicTitle: { type: 'string' },
+                questionCount: { type: 'integer' },
+                trialBlockLabel: { type: 'string' },
+                useFullBook: { type: 'boolean' }
+              }
+            }
+          }
+        }
+      },
+      EntQuestionType: {
+        type: 'string',
+        enum: [
+          'single_choice',
+          'multiple_choice',
+          'matching_single',
+          'matching_multiple',
+          'short_answer',
+          'text_input'
+        ],
+        description: 'Форматы заданий в духе ЕНТ (Казахстан)'
+      },
+      MatchingItem: {
+        type: 'object',
+        required: ['id', 'text'],
+        properties: {
+          id: { type: 'string' },
+          text: { type: 'string' }
+        }
+      },
+      GeneratedTestQuestion: {
+        type: 'object',
+        description: 'Вопрос без правильных ответов (как отдаёт API после генерации)',
+        properties: {
+          questionType: { $ref: '#/components/schemas/EntQuestionType' },
+          questionText: { type: 'string' },
+          options: { type: 'array', items: { type: 'string' } },
+          matchingLeft: { type: 'array', items: { $ref: '#/components/schemas/MatchingItem' } },
+          matchingRight: { type: 'array', items: { $ref: '#/components/schemas/MatchingItem' } },
+          relatedContent: {
+            type: 'object',
+            properties: {
+              pages: { type: 'array', items: { type: 'number' } },
+              chapterId: { type: 'string' },
+              topicId: { type: 'string' }
+            }
+          }
+        }
       },
       GeneratedTest: {
         type: 'object',
@@ -296,15 +451,10 @@ const swaggerSpec = {
           subjectId: { type: 'string' },
           bookId: { type: 'string' },
           chapterId: { type: 'string' },
+          testProfile: { $ref: '#/components/schemas/TestGenerationProfile' },
           questions: {
             type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                questionText: { type: 'string' },
-                options: { type: 'array', items: { type: 'string' } }
-              }
-            }
+            items: { $ref: '#/components/schemas/GeneratedTestQuestion' }
           },
           createdAt: { type: 'string', format: 'date-time' }
         }
@@ -321,12 +471,21 @@ const swaggerSpec = {
               required: ['questionText', 'selectedOption'],
               properties: {
                 questionText: { type: 'string' },
-                selectedOption: { type: 'string' }
+                selectedOption: {
+                  type: 'string',
+                  description:
+                    'Ответ: для single/short/text — строка; для multiple_choice — JSON-массив строк; для matching — JSON-объект с id'
+                }
               }
             }
           },
           roadmapNodeId: { type: 'string', description: 'ID узла roadmap (если тест запущен из карты знаний)' },
-          roadmapSessionId: { type: 'string', description: 'Уникальный ID roadmap-сессии (для идемпотентности)' }
+          roadmapSessionId: { type: 'string', description: 'Уникальный ID roadmap-сессии (для идемпотентности)' },
+          forTrial: {
+            type: 'boolean',
+            description:
+              'Пробник: в `data` добавляется `trialTopicMastery` — темы с ≥ 80% верных по вопросам с привязкой к теме учебника (для POST /trial/apply-results)'
+          }
         }
       },
       SubmitTestResponse: {
@@ -375,15 +534,27 @@ const swaggerSpec = {
                 items: {
                   type: 'object',
                   properties: {
+                    questionType: { $ref: '#/components/schemas/EntQuestionType' },
                     questionText: { type: 'string' },
                     options: { type: 'array', items: { type: 'string' } },
-                    correctOption: { type: 'string' },
+                    correctOption: {
+                      type: 'string',
+                      description: 'Текстовая сводка правильного ответа (все типы)'
+                    },
                     selectedOption: { type: 'string' },
                     isCorrect: { type: 'boolean' },
-                    explanation: { type: 'string' }
+                    explanation: { type: 'string' },
+                    matchingLeft: { type: 'array', items: { $ref: '#/components/schemas/MatchingItem' } },
+                    matchingRight: { type: 'array', items: { $ref: '#/components/schemas/MatchingItem' } }
                   }
                 }
-              }
+              },
+              trialTopicMastery: {
+                type: 'array',
+                items: { $ref: '#/components/schemas/TrialTopicMasteryRow' },
+                description: 'Только при `forTrial: true` в запросе — темы, по которым в этом тесте ≥ 80% верных (агрегат по вопросам с topicId)'
+              },
+              roadmap: { $ref: '#/components/schemas/TestSubmittedResponse' }
             }
           }
         }
@@ -488,12 +659,11 @@ const swaggerSpec = {
           prerequisites: { type: 'array', items: { type: 'string' } },
           metadata: { type: 'object' },
           availability: { type: 'string', enum: ['locked', 'available'] },
-          progressStatus: { type: 'string', enum: ['not_started', 'in_progress', 'mastered'] },
-          attemptsCount: { type: 'integer' },
-          lastAttemptAt: { type: 'string', format: 'date-time' },
-          bestScore: { type: 'number', description: '0–100' },
-          avgScore: { type: 'number' },
-          masteryScore: { type: 'number', description: '0..1' },
+          mastered: { type: 'boolean', description: 'Освоено (порог обычного теста или пробника)' },
+          chapterUrl: { type: 'string', description: 'Относительный путь к странице главы' },
+          bookId: { type: 'string' },
+          chapterId: { type: 'string' },
+          testId: { type: 'string', description: 'Id сохранённого теста по главе, если есть' },
           isRecommended: { type: 'boolean' },
           recommendedPriority: { type: 'integer' },
           recommendedReason: { type: 'string', enum: ['CONTINUE_IN_PROGRESS', 'UNLOCKS_NEXT_TOPICS', 'LOW_MASTERY', 'PART_OF_MAIN_PATH', 'NOT_STARTED', ''] },
@@ -559,7 +729,7 @@ const swaggerSpec = {
               type: 'object',
               properties: {
                 nodeId: { type: 'string' },
-                progressStatus: { type: 'string', enum: ['not_started', 'in_progress', 'mastered'] }
+                mastered: { type: 'boolean' }
               }
             }
           },
@@ -597,6 +767,54 @@ const swaggerSpec = {
           bookId: { type: 'string' },
           chapterId: { type: 'string' },
           fullBook: { type: 'boolean', default: false }
+        }
+      },
+      RoadmapLessonVideo: {
+        type: 'object',
+        properties: {
+          url: { type: 'string' },
+          durationSec: { type: 'number' },
+          posterUrl: { type: 'string' }
+        }
+      },
+      RoadmapLessonResponse: {
+        type: 'object',
+        properties: {
+          nodeId: { type: 'string' },
+          lessonId: { type: 'string', description: 'Внутренний id контента (или совпадает с nodeId)' },
+          title: { type: 'string' },
+          summary: { type: 'string', description: 'Краткая выжимка (Markdown), кэшируется после ИИ' },
+          content: { type: 'string', description: 'Основной текст; HTML при хранении приводится к тексту для единого формата' },
+          textFormat: { type: 'string', enum: ['markdown'], description: 'Договорённость API: markdown' },
+          video: { oneOf: [{ type: 'null' }, { $ref: '#/components/schemas/RoadmapLessonVideo' }] },
+          readCompletedAt: { type: 'string', format: 'date-time', nullable: true }
+        }
+      },
+      RoadmapLessonReadResponse: {
+        type: 'object',
+        properties: {
+          readCompletedAt: { type: 'string', format: 'date-time' }
+        }
+      },
+      RoadmapNodeChatRequest: {
+        type: 'object',
+        required: ['subjectId', 'text'],
+        properties: {
+          subjectId: { type: 'string' },
+          text: { type: 'string' },
+          attachmentIds: { type: 'array', items: { type: 'string' }, description: 'ID вложений из POST …/chat/attachments' }
+        }
+      },
+      RoadmapNodeChatReply: {
+        type: 'object',
+        properties: {
+          reply: { type: 'string' }
+        }
+      },
+      RoadmapChatAttachmentUploadResponse: {
+        type: 'object',
+        properties: {
+          attachmentId: { type: 'string' }
         }
       }
     }
@@ -987,6 +1205,8 @@ const swaggerSpec = {
       post: {
         tags: ['Tests'],
         summary: 'Отправить ответы (auth, сохраняется в историю)',
+        description:
+          'С `forTrial: true` в теле (режим пробника) в `data` возвращается `trialTopicMastery` — темы с ≥ 80% за этот тест. С `roadmapNodeId` + `roadmapSessionId` — также `roadmap` (дельта узлов, рекомендации).',
         security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/SubmitTestRequest' } } } },
         responses: {
@@ -1011,12 +1231,141 @@ const swaggerSpec = {
       post: {
         tags: ['Tests'],
         summary: 'Отправить ответы (гость, без сохранения в историю)',
+        description: 'С `forTrial: true` — в ответе `data.trialTopicMastery` для накопления и POST /trial/apply-results после регистрации.',
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/SubmitTestRequest' } } } },
         responses: {
           200: { description: 'Результат теста (не сохраняется)', content: { 'application/json': { schema: { $ref: '#/components/schemas/SubmitTestResponse' } } } }
         }
       }
     },
+    '/tests/solo/start': {
+      post: {
+        tags: ['Tests'],
+        summary: 'Старт Solo-теста (daily pack / practice, WebSocket)',
+        description: 'Тело как у генерации теста плюс обязательное поле `mode`. Далее сокет: solo:join / solo:answer / solo:finish.',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['subjectId', 'bookId', 'mode'],
+                properties: {
+                  subjectId: { type: 'string' },
+                  bookId: { type: 'string' },
+                  chapterId: { type: 'string' },
+                  fullBook: { type: 'boolean' },
+                  testProfile: { $ref: '#/components/schemas/TestGenerationProfile' },
+                  questionCount: { type: 'integer' },
+                  mode: { type: 'string', enum: ['daily_pack', 'practice'] }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          201: {
+            description: 'Сессия Solo, таймер и т.д.',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/GeneratedTest' } } } } }
+          }
+        }
+      }
+    },
+    '/tests/solo/answer': {
+      post: {
+        tags: ['Tests'],
+        summary: 'Отправить ответ в Solo-сессии (без тела submit как в обычном тесте)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['soloSessionId', 'questionIndex'],
+                properties: {
+                  soloSessionId: { type: 'string' },
+                  questionIndex: { type: 'integer', minimum: 0 },
+                  selectedOption: { type: 'string' }
+                }
+              }
+            }
+          }
+        },
+        responses: { 200: { description: 'ACK ответа' } }
+      }
+    },
+    '/tests/solo/finish': {
+      post: {
+        tags: ['Tests'],
+        summary: 'Завершить Solo-сессию (итог, рейтинг)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['soloSessionId'], properties: { soloSessionId: { type: 'string' } } } } } },
+        responses: { 200: { description: 'Результат и solo-мета', content: { 'application/json': { schema: { $ref: '#/components/schemas/SubmitTestResponse' } } } } }
+      }
+    },
+    '/tests/solo/leaderboard': {
+      get: {
+        tags: ['Tests'],
+        summary: 'Таблица лидеров Solo (daily pack)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'dailyPackId', in: 'query', required: true, schema: { type: 'string' } },
+          { name: 'period', in: 'query', schema: { type: 'string', enum: ['today', 'week'] } }
+        ],
+        responses: { 200: { description: 'Топ и позиция пользователя' } }
+      }
+    },
+
+    // ==================== TRIAL (пробник ВНО) ====================
+    '/trial/config': {
+      get: {
+        tags: ['Trial'],
+        summary: 'Конфиг пробника: main/profile предметы, entTrialInfo',
+        description: 'Без auth — общий список. С JWT (cookie или Bearer) в ответе может быть `pairedProfileIds` из пары предметов пользователя.',
+        security: [],
+        responses: {
+          200: {
+            description: 'Конфиг',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/TrialConfigResponse' } } } } }
+          }
+        }
+      }
+    },
+    '/trial/plan': {
+      post: {
+        tags: ['Trial'],
+        summary: 'Построить план из 5 блоков (2 профильных id)',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { type: 'object', required: ['profileSubjectIds'], properties: { profileSubjectIds: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 2 } } } }
+          }
+        },
+        responses: {
+          200: { description: 'План', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/TrialPlanResponse' } } } } } },
+          400: { description: 'Нужны 2 разных profile subject id' }
+        }
+      }
+    },
+    '/trial/apply-results': {
+      post: {
+        tags: ['Trial'],
+        summary: 'Перенести результаты пробника на personal roadmap (освоенные темы)',
+        description:
+          'Принимает строки `subjectId`, `nodeId` (тема), `scorePercent` ≥ 80. Обычно наполняется из агрегатов `trialTopicMastery` с шагов пробника. Требуется auth.',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/TrialApplyResultsRequest' } } } },
+        responses: {
+          200: {
+            description: 'Прогресс обновлён',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/TrialApplyResultsResponse' } } } } }
+          },
+          400: { description: 'Пустой или невалидный `results`' }
+        }
+      }
+    },
+
     '/tests/{id}': {
       get: {
         tags: ['Tests'],
@@ -1087,6 +1436,164 @@ const swaggerSpec = {
                         ai: { type: 'object', properties: { coachSummary: { type: 'string' }, nextStepExplanation: { type: 'string' } } }
                       }
                     }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    '/roadmaps/picker-subjects': {
+      get: {
+        tags: ['Roadmaps'],
+        summary: 'Предметы для bottom sheet (пара профиля + агрегат прогресса)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        responses: { 200: { description: 'Список предметов' } }
+      }
+    },
+    '/roadmaps/nodes/{nodeId}/acknowledge-material': {
+      post: {
+        tags: ['Roadmaps'],
+        summary: '«Освоил» материал: сброс неудачных попыток теста по узлу',
+        description:
+          'Снимает блокировку повторного теста (lowScoreFailCount) при серии низких оценок по узлу карты. Тело: `subjectId`.',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [{ name: 'nodeId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', required: ['subjectId'], properties: { subjectId: { type: 'string' } } } } }
+        },
+        responses: { 200: { description: 'Счётчик сброшен' }, 400: { description: 'Невалидные данные' } }
+      }
+    },
+    '/roadmaps/nodes/{nodeId}/lesson': {
+      get: {
+        tags: ['Roadmaps'],
+        summary: 'Урок по узлу roadmap',
+        description:
+          'Контент из canonical-узла: `metadata.lesson` или `description`. Выжимка summary генерируется ИИ и кэшируется в `metadata.lesson.summary`. Базовый путь API: `/api/v1/roadmaps/...`.',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [
+          { name: 'nodeId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'subjectId', in: 'query', required: true, schema: { type: 'string' } }
+        ],
+        responses: {
+          200: {
+            description: 'Урок',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean' },
+                    data: { $ref: '#/components/schemas/RoadmapLessonResponse' }
+                  }
+                }
+              }
+            }
+          },
+          404: { description: 'Предмет или узел не найдены' }
+        }
+      }
+    },
+    '/roadmaps/nodes/{nodeId}/lesson/read': {
+      post: {
+        tags: ['Roadmaps'],
+        summary: 'Отметить урок прочитанным',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [{ name: 'nodeId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['subjectId'],
+                properties: { subjectId: { type: 'string' } }
+              }
+            }
+          }
+        },
+        responses: {
+          200: {
+            description: 'Отметка сохранена',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean' },
+                    data: { $ref: '#/components/schemas/RoadmapLessonReadResponse' }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    '/roadmaps/nodes/{nodeId}/chat/messages': {
+      post: {
+        tags: ['Roadmaps'],
+        summary: 'Чат с ИИ по теме узла',
+        description: 'Контекст на сервере: урок и предмет; без «интернет-режима». Можно прикрепить ранее загруженные изображения по attachmentIds.',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [{ name: 'nodeId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/RoadmapNodeChatRequest' } } }
+        },
+        responses: {
+          200: {
+            description: 'Ответ ассистента',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean' },
+                    data: { $ref: '#/components/schemas/RoadmapNodeChatReply' }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    '/roadmaps/nodes/{nodeId}/chat/attachments': {
+      post: {
+        tags: ['Roadmaps'],
+        summary: 'Загрузить изображение для чата узла',
+        description: 'multipart/form-data: поле `file` + опционально поле `subjectId` (если указано — должно быть валидным Mongo id). Рекомендуется всегда передавать subjectId.',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [{ name: 'nodeId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                required: ['file'],
+                properties: {
+                  file: { type: 'string', format: 'binary' },
+                  subjectId: { type: 'string', description: 'MongoDB ObjectId предмета' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          201: {
+            description: 'Файл сохранён',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean' },
+                    data: { $ref: '#/components/schemas/RoadmapChatAttachmentUploadResponse' }
                   }
                 }
               }

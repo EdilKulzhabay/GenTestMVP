@@ -145,9 +145,8 @@ class RoadmapAIService {
       nodeId: string;
       title: string;
       availability: string;
-      progressStatus: string;
+      mastered: boolean;
       bestScore: number;
-      attemptsCount: number;
     }>;
     nextRecommended?: { nodeId: string; reason: string; priority: number } | null;
     testHistorySummary: Array<{
@@ -226,6 +225,142 @@ class RoadmapAIService {
     } catch {
       return { coachSummary: '' };
     }
+  }
+
+  /**
+   * Краткая выжимка урока (markdown), для кэша на canonical metadata.lesson.summary.
+   */
+  async generateLessonSummary(input: {
+    subjectTitle: string;
+    nodeTitle: string;
+    lessonText: string;
+  }): Promise<string> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw AppError.badRequest('OPENAI_API_KEY is not set');
+    }
+
+    const body = input.lessonText.length > 12000 ? `${input.lessonText.slice(0, 12000)}\n\n[Текст обрезан.]` : input.lessonText;
+
+    const prompt = [
+      'По тексту урока составь очень краткую выжимку для ученика (до 900 символов).',
+      'Формат ответа: только Markdown (заголовки ###, маркеры, без преамбулы «Конечно» и без JSON).',
+      'Без общих советов про интернет и без тем вне этого урока.',
+      '',
+      `Предмет: ${input.subjectTitle}. Тема узла: ${input.nodeTitle}.`,
+      '',
+      'Текст урока:',
+      body
+    ].join('\n');
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        temperature: 0.35,
+        max_tokens: 600,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Ты методист; пишешь только по переданному фрагменту урока. Ответ краткий, Markdown.'
+          },
+          { role: 'user', content: prompt }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('[roadmap AI] lesson summary failed', response.status, errText);
+      throw new Error(`OpenAI: ${response.status}`);
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    return String(data.choices?.[0]?.message?.content ?? '').trim();
+  }
+
+  /**
+   * Чат по одному узлу roadmap: контекст только урок + предмет; опционально изображения (base64).
+   */
+  async chatLessonNode(input: {
+    subjectTitle: string;
+    nodeTitle: string;
+    nodeDescription?: string;
+    lessonText: string;
+    userMessage: string;
+    images?: Array<{ mimeType: string; base64: string }>;
+  }): Promise<string> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw AppError.badRequest('OPENAI_API_KEY is not set');
+    }
+
+    const ctx = input.lessonText.length > 14000 ? `${input.lessonText.slice(0, 14000)}\n\n[Фрагмент обрезан.]` : input.lessonText;
+
+    const system =
+      'Ты репетитор по подготовке к ЕНТ. Отвечай только в рамках переданного контекста урока и темы узла. ' +
+      'Не выдумывай факты из интернета и не расширяй тему на весь мир. Если вопрос касается только фото — опирайся на изображение и контекст темы. ' +
+      'Язык ответа: как у сообщения ученика (русский/казахский и т.д.), если язык неочевиден — русский.';
+
+    const contextBlock = [
+      `Предмет: ${input.subjectTitle}`,
+      `Узел (тема): ${input.nodeTitle}`,
+      input.nodeDescription?.trim() ? `Описание узла: ${input.nodeDescription.trim()}` : '',
+      '',
+      'Текст урока (единственный допустимый источник теории):',
+      ctx
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    type Part =
+      | { type: 'text'; text: string }
+      | { type: 'image_url'; image_url: { url: string } };
+
+    const userParts: Part[] = [{ type: 'text', text: `${contextBlock}\n\n---\nВопрос ученика:\n${input.userMessage}` }];
+
+    for (const img of input.images ?? []) {
+      const mime = img.mimeType.trim() || 'image/jpeg';
+      userParts.push({
+        type: 'image_url',
+        image_url: { url: `data:${mime};base64,${img.base64}` }
+      });
+    }
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0.45,
+        max_tokens: 1800,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userParts }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('[roadmap AI] lesson chat failed', response.status, errText);
+      throw new Error(`OpenAI: ${response.status}`);
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    return String(data.choices?.[0]?.message?.content ?? '').trim();
   }
 }
 

@@ -14,6 +14,7 @@ import { BookCreatePage } from '../pages/admin/BookCreatePage';
 import { ChapterCreatePage } from '../pages/admin/ChapterCreatePage';
 import { ContentCreatePage } from '../pages/admin/ContentCreatePage';
 import { SubjectImportPage } from '../pages/admin/SubjectImportPage';
+import { ProfileSubjectPairAdminPage } from '../pages/admin/ProfileSubjectPairAdminPage';
 import { RoadmapCanonicalCreatePage } from '../pages/admin/RoadmapCanonicalCreatePage';
 import { RoadmapCanonicalViewPage } from '../pages/admin/RoadmapCanonicalViewPage';
 import { SubjectDetailPage } from '../pages/admin/SubjectDetailPage';
@@ -25,7 +26,13 @@ import { TestPage } from '../pages/user/TestPage';
 import { TestResultPage } from '../pages/user/TestResultPage';
 import { TestHistoryDetailPage } from '../pages/user/TestHistoryDetailPage';
 import { KnowledgeMapPage } from '../pages/user/KnowledgeMapPage';
+import { RoadmapChatPage } from '../pages/user/RoadmapChatPage';
+import { RoadmapNodeMaterialPage } from '../pages/user/RoadmapNodeMaterialPage';
 import { GuestTestResultPage } from '../pages/guest/GuestTestResultPage';
+import { ChapterContentPage } from '../pages/shared/ChapterContentPage';
+import { TrialEntryPage } from '../pages/trial/TrialEntryPage';
+import { GuestTrialCompletePage } from '../pages/trial/GuestTrialCompletePage';
+import { UserTrialCompletePage } from '../pages/trial/UserTrialCompletePage';
 import { PrivateRoute } from './PrivateRoute';
 import { useAuth } from '../store/auth.store';
 
@@ -71,6 +78,12 @@ export const router = createBrowserRouter([
     children: [
       { path: '/guest/subjects', element: <SubjectSelectPage /> },
       { path: '/guest/books', element: <BookSelectPage /> },
+      { path: '/guest/trial', element: <TrialEntryPage /> },
+      { path: '/guest/trial/complete', element: <GuestTrialCompletePage /> },
+      {
+        path: '/guest/subjects/:subjectId/books/:bookId/chapters/:chapterId',
+        element: <ChapterContentPage routePrefix="/guest" />
+      },
       { path: '/guest/test/start', element: <TestStartPage /> },
       { path: '/guest/test', element: <TestPage /> },
       { path: '/guest/test/result', element: <GuestTestResultPage /> }
@@ -89,6 +102,7 @@ export const router = createBrowserRouter([
           { path: '/admin/books/new', element: <BookCreatePage /> },
           { path: '/admin/chapters/new', element: <ChapterCreatePage /> },
           { path: '/admin/contents/new', element: <ContentCreatePage /> },
+          { path: '/admin/profile-subject-pairs', element: <ProfileSubjectPairAdminPage /> },
           { path: '/admin/roadmaps/create', element: <RoadmapCanonicalCreatePage /> },
           { path: '/admin/roadmaps/:subjectId', element: <RoadmapCanonicalViewPage /> }
         ]
@@ -103,6 +117,14 @@ export const router = createBrowserRouter([
         children: [
           { path: '/user', element: <UserDashboard /> },
           { path: '/user/roadmap', element: <KnowledgeMapPage /> },
+          { path: '/user/roadmap/material', element: <RoadmapNodeMaterialPage /> },
+          { path: '/user/roadmap/chat', element: <RoadmapChatPage /> },
+          { path: '/user/trial', element: <TrialEntryPage /> },
+          { path: '/user/trial/complete', element: <UserTrialCompletePage /> },
+          {
+            path: '/user/subjects/:subjectId/books/:bookId/chapters/:chapterId',
+            element: <ChapterContentPage routePrefix="/user" />
+          },
           { path: '/user/subjects', element: <SubjectSelectPage /> },
           { path: '/user/books', element: <BookSelectPage /> },
           { path: '/user/test/start', element: <TestStartPage /> },

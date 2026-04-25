@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { buildRoadmapDisplayTree } from '../../utils/roadmapTree';
 import { Button } from '../ui/Button';
 import type { PersonalRoadmapNode } from '../../types/roadmap.types';
@@ -6,12 +7,6 @@ import type { PersonalRoadmapNode } from '../../types/roadmap.types';
 const AVAIL_RU: Record<string, string> = {
   locked: 'Заблокировано',
   available: 'Доступно'
-};
-
-const PROG_RU: Record<string, string> = {
-  not_started: 'Не начато',
-  in_progress: 'В процессе',
-  mastered: 'Пройдено'
 };
 
 const REASON_RU: Record<string, string> = {
@@ -35,6 +30,7 @@ export type CanonicalTreeNode = {
   description?: string;
   prerequisites: string[];
   metadata?: Record<string, unknown>;
+  chapterUrl?: string;
 };
 
 type TreeMode = 'personal' | 'canonical';
@@ -45,15 +41,31 @@ function Branch(props: {
   childMap: Map<string, CanonicalTreeNode[]>;
   mode: TreeMode;
   personalById: Map<string, PersonalRoadmapNode>;
+  routePrefix: string;
+  subjectId?: string;
   onStartTest?: (nodeId: string) => void;
+  onOpenChat?: (nodeId: string) => void;
 }): React.ReactElement {
-  const { node, depth, childMap, mode, personalById, onStartTest } = props;
+  const { node, depth, childMap, mode, personalById, routePrefix, subjectId, onStartTest, onOpenChat } =
+    props;
   const children = childMap.get(node.nodeId) ?? [];
   const personal = mode === 'personal' ? personalById.get(node.nodeId) : undefined;
 
   const isLocked = personal?.availability === 'locked';
+  const blockedByFails = personal?.knowledgeMapTestBlocked === true;
   const canStartTest =
-    personal && personal.availability === 'available' && personal.progressStatus !== 'mastered';
+    personal &&
+    personal.availability === 'available' &&
+    !personal.mastered &&
+    !blockedByFails;
+
+  const chapterHref =
+    node.chapterUrl && routePrefix ? `${routePrefix}${node.chapterUrl}` : undefined;
+  const materialQuery =
+    subjectId && node.nodeId
+      ? `?subjectId=${encodeURIComponent(subjectId)}&nodeId=${encodeURIComponent(node.nodeId)}`
+      : null;
+  const materialHref = materialQuery ? `${routePrefix}/roadmap/material${materialQuery}` : undefined;
 
   const cardStyle =
     mode === 'personal'
@@ -61,7 +73,7 @@ function Branch(props: {
         ? 'border-slate-100 bg-slate-50 opacity-70'
         : personal?.isRecommended
           ? 'border-blue-200 bg-blue-50/50'
-          : personal?.progressStatus === 'mastered'
+          : personal?.mastered
             ? 'border-emerald-200 bg-emerald-50/25'
             : 'border-slate-200 bg-white'
       : 'border-slate-200 bg-white';
@@ -81,15 +93,35 @@ function Branch(props: {
             {node.description ? (
               <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{node.description}</p>
             ) : null}
-            <p className="mt-1 font-mono text-[10px] text-slate-400">{node.nodeId}</p>
+            {mode === 'personal' && materialHref ? (
+              <Link
+                to={materialHref}
+                className="mt-2 mr-3 inline-block text-xs font-medium text-emerald-700 hover:underline"
+              >
+                Материал урока →
+              </Link>
+            ) : null}
+            {chapterHref ? (
+              <Link
+                to={chapterHref}
+                className="mt-2 inline-block text-xs font-medium text-slate-600 hover:underline"
+              >
+                Учебник (глава) →
+              </Link>
+            ) : null}
             {mode === 'personal' && personal && (
               <div className="mt-2 flex flex-wrap gap-2">
                 <span className={badgeClass(isLocked ? 'neutral' : 'avail')}>
                   {AVAIL_RU[personal.availability] ?? personal.availability}
                 </span>
-                <span className={badgeClass('prog')}>
-                  {PROG_RU[personal.progressStatus] ?? personal.progressStatus}
+                <span className={badgeClass(personal.mastered ? 'prog' : 'neutral')}>
+                  {personal.mastered ? 'Освоено' : 'Не освоено'}
                 </span>
+                {blockedByFails && (
+                  <span className="inline-flex rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-800">
+                    Тест ограничен
+                  </span>
+                )}
                 {personal.isRecommended && <span className={badgeClass('neutral')}>Рекомендуем</span>}
               </div>
             )}
@@ -101,22 +133,37 @@ function Branch(props: {
           </div>
           {mode === 'personal' && personal && (
             <div className="flex flex-col items-end gap-2 text-xs text-slate-600">
-              {personal.attemptsCount > 0 && (
-                <div className="text-right">
-                  <p>Лучший: {personal.bestScore}%</p>
-                  <p>Попыток: {personal.attemptsCount}</p>
-                </div>
-              )}
-              {canStartTest && onStartTest && (
-                <Button
-                  onClick={() => onStartTest(node.nodeId)}
-                  variant={personal.isRecommended ? undefined : 'outline'}
-                  className="text-xs"
-                >
-                  {personal.progressStatus === 'in_progress' ? 'Продолжить' : 'Пройти тест'}
-                </Button>
-              )}
-              {personal.progressStatus === 'mastered' && (
+              <div className="flex flex-col gap-1.5">
+                {personal.availability === 'available' && !personal.mastered && blockedByFails && materialHref && (
+                  <p className="max-w-[220px] text-right text-[11px] leading-snug text-rose-800">
+                    Три раза меньше 80%. Повторите{' '}
+                    <Link to={materialHref} className="font-medium underline">
+                      материал
+                    </Link>{' '}
+                    и нажмите «Освоил».
+                  </p>
+                )}
+                {canStartTest && onStartTest && (
+                  <Button
+                    onClick={() => onStartTest(node.nodeId)}
+                    variant={personal.isRecommended ? undefined : 'outline'}
+                    className="text-xs"
+                  >
+                    Пройти тест
+                  </Button>
+                )}
+                {personal.availability === 'available' && onOpenChat && (
+                  <Button
+                    type="button"
+                    onClick={() => onOpenChat(node.nodeId)}
+                    variant="ghost"
+                    className="text-xs text-emerald-800 hover:bg-emerald-50"
+                  >
+                    Чат
+                  </Button>
+                )}
+              </div>
+              {personal.mastered && (
                 <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
                   ✓ Освоено
                 </span>
@@ -150,7 +197,10 @@ function Branch(props: {
                 childMap={childMap}
                 mode={mode}
                 personalById={personalById}
+                routePrefix={routePrefix}
+                subjectId={subjectId}
                 onStartTest={onStartTest}
+                onOpenChat={onOpenChat}
               />
             ))}
           </ul>
@@ -164,7 +214,12 @@ export interface RoadmapTreeViewProps {
   mode: TreeMode;
   nodes: CanonicalTreeNode[];
   personalById?: Map<string, PersonalRoadmapNode>;
+  /** Нужен для ссылки «Материал урока» в персональном режиме */
+  subjectId?: string;
   onStartTest?: (nodeId: string) => void;
+  onOpenChat?: (nodeId: string) => void;
+  /** Префикс маршрута: `/user` или `/guest` для ссылок на главы */
+  routePrefix?: string;
   className?: string;
 }
 
@@ -172,7 +227,10 @@ export const RoadmapTreeView: React.FC<RoadmapTreeViewProps> = ({
   mode,
   nodes,
   personalById,
+  subjectId,
   onStartTest,
+  onOpenChat,
+  routePrefix = '/user',
   className = ''
 }) => {
   const { roots, childMap } = useMemo(() => buildRoadmapDisplayTree(nodes), [nodes]);
@@ -188,7 +246,10 @@ export const RoadmapTreeView: React.FC<RoadmapTreeViewProps> = ({
           childMap={childMap}
           mode={mode}
           personalById={pmap}
+          routePrefix={routePrefix}
+          subjectId={mode === 'personal' ? subjectId : undefined}
           onStartTest={mode === 'personal' ? onStartTest : undefined}
+          onOpenChat={mode === 'personal' ? onOpenChat : undefined}
         />
       ))}
     </ul>

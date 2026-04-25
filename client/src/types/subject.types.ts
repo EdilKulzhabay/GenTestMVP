@@ -40,9 +40,14 @@ export interface Book {
   chapters: Chapter[];
 }
 
+/** Основной предмет (3 общих) или профильный (пара ЕНТ) */
+export type SubjectKind = 'main' | 'profile';
+
 export interface Subject {
   _id: string;
   title: string;
   description?: string;
+  /** По умолчанию main для старых записей */
+  subjectKind?: SubjectKind;
   books: Book[];
 }

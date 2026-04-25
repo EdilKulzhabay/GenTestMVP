@@ -105,7 +105,7 @@ export const RoadmapCanonicalViewPage: React.FC = () => {
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
             Дерево узлов
           </p>
-          <RoadmapTreeView mode="canonical" nodes={roadmap.nodes} />
+          <RoadmapTreeView mode="canonical" nodes={roadmap.nodes} routePrefix="/user" />
         </>
       )}
     </div>

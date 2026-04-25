@@ -15,6 +15,13 @@ const router = Router();
  */
 router.get(
   '/',
+  [
+    query('subjectKind')
+      .optional()
+      .isIn(['main', 'profile'])
+      .withMessage('subjectKind must be main or profile')
+  ],
+  validate,
   asyncHandler(subjectController.getAllSubjects.bind(subjectController))
 );
 
@@ -67,7 +74,11 @@ router.post(
       .optional()
       .trim()
       .isLength({ max: 1000 })
-      .withMessage('Description must be less than 1000 characters')
+      .withMessage('Description must be less than 1000 characters'),
+    body('subjectKind')
+      .optional()
+      .isIn(['main', 'profile'])
+      .withMessage('subjectKind must be main or profile')
   ],
   validate,
   asyncHandler(subjectController.createSubject.bind(subjectController))
@@ -202,7 +213,10 @@ router.post(
 router.patch(
   '/:id',
   isAdmin,
-  [param('id').isMongoId()],
+  [
+    param('id').isMongoId(),
+    body('subjectKind').optional().isIn(['main', 'profile']).withMessage('subjectKind must be main or profile')
+  ],
   validate,
   asyncHandler(subjectController.updateSubject.bind(subjectController))
 );

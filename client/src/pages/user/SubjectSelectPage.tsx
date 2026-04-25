@@ -6,10 +6,13 @@ import { Loader } from '../../components/ui/Loader';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
 import { getApiErrorMessage } from '../../utils/error';
 import { useGuestMode } from '../../hooks/useGuestMode';
+import { useAuth } from '../../store/auth.store';
+import { filterSubjectsForLearner } from '../../utils/learnerSubjects.util';
 
 export const SubjectSelectPage: React.FC = () => {
   const navigate = useNavigate();
-  const { basePath } = useGuestMode();
+  const { basePath, isGuest } = useGuestMode();
+  const { user } = useAuth();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +23,7 @@ export const SubjectSelectPage: React.FC = () => {
       setError(null);
       try {
         const data = await subjectApi.getSubjects();
-        setSubjects(data);
+        setSubjects(isGuest ? data : filterSubjectsForLearner(data, user));
       } catch (err) {
         setError(getApiErrorMessage(err));
       } finally {
@@ -28,7 +31,7 @@ export const SubjectSelectPage: React.FC = () => {
       }
     };
     void load();
-  }, []);
+  }, [isGuest, user]);
 
   return (
     <div className="space-y-4">

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { subjectApi } from '../../api/subject.api';
+import { roadmapApi } from '../../api/roadmap.api';
 import { Subject, Book, Chapter, Topic } from '../../types/subject.types';
 import { Loader } from '../../components/ui/Loader';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
@@ -175,6 +176,62 @@ const AddInline: React.FC<{
   );
 };
 
+const RebuildRoadmapButton: React.FC<{
+  subjectId: string;
+  onDone: () => Promise<void>;
+  flash: (m: string) => void;
+}> = ({ subjectId, onDone, flash }) => {
+  const [loading, setLoading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const run = async () => {
+    setLocalError(null);
+    setLoading(true);
+    try {
+      const r = await roadmapApi.rebuildFromTopics(subjectId);
+      await onDone();
+      flash(`Карта знаний актуализирована: ${r.nodesCount} узлов (версия ${r.version}).`);
+    } catch (e) {
+      setLocalError(getApiErrorMessage(e));
+    } finally {
+      setLoading(false);
+      setConfirming(false);
+    }
+  };
+
+  if (confirming) {
+    return (
+      <div className="flex flex-col gap-2">
+        <span className="inline-flex flex-wrap items-center gap-2 text-sm text-slate-700">
+          <span>Пересобрать карту по главам учебника?</span>
+          <Button type="button" className="text-xs" disabled={loading} onClick={() => void run()}>
+            {loading ? '…' : 'Да, пересобрать'}
+          </Button>
+          <button
+            type="button"
+            className="text-xs text-slate-500 hover:underline"
+            onClick={() => setConfirming(false)}
+            disabled={loading}
+          >
+            Отмена
+          </button>
+        </span>
+        {localError ? <p className="text-xs text-red-600">{localError}</p> : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <Button type="button" variant="outline" onClick={() => setConfirming(true)}>
+        Актуализировать карту знаний
+      </Button>
+      {localError ? <p className="text-xs text-red-600">{localError}</p> : null}
+    </div>
+  );
+};
+
 /* ───── main page ───── */
 
 export const SubjectDetailPage: React.FC = () => {
@@ -247,6 +304,26 @@ export const SubjectDetailPage: React.FC = () => {
         {subject.description && (
           <p className="mt-1 text-sm text-slate-500">{subject.description}</p>
         )}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-sm text-slate-600">Тип:</span>
+          <select
+            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-900"
+            value={subject.subjectKind ?? 'main'}
+            onChange={async (e) => {
+              const subjectKind = e.target.value as 'main' | 'profile';
+              try {
+                await subjectApi.updateSubject(sid, { subjectKind });
+                await reload();
+                flash('Тип предмета обновлён');
+              } catch (err) {
+                setError(getApiErrorMessage(err));
+              }
+            }}
+          >
+            <option value="main">Основной</option>
+            <option value="profile">Профильный</option>
+          </select>
+        </div>
       </div>
 
       {msg && <SuccessMessage message={msg} />}
@@ -299,13 +376,20 @@ export const SubjectDetailPage: React.FC = () => {
       </div>
 
       {/* roadmap link */}
-      <div className="flex flex-wrap gap-3 border-t border-slate-200 pt-4">
-        <Link to={`/admin/roadmaps/${sid}`}>
-          <Button variant="outline">Карта знаний</Button>
-        </Link>
-        <Link to="/admin/roadmaps/create">
-          <Button variant="outline">Создать / обновить roadmap</Button>
-        </Link>
+      <div className="space-y-3 border-t border-slate-200 pt-4">
+        <div className="flex flex-wrap gap-3">
+          <Link to={`/admin/roadmaps/${sid}`}>
+            <Button variant="outline">Карта знаний</Button>
+          </Link>
+          <Link to="/admin/roadmaps/create">
+            <Button variant="outline">Создать / обновить roadmap</Button>
+          </Link>
+          <RebuildRoadmapButton subjectId={sid} onDone={reload} flash={flash} />
+        </div>
+        <p className="text-xs text-slate-500">
+          «Актуализировать» удаляет сохранённую запись карты в БД и строит её заново по текущим темам (в главах) и
+          контенту учебника.
+        </p>
       </div>
     </div>
   );

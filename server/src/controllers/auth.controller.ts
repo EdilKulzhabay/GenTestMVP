@@ -207,7 +207,15 @@ class AuthController {
     if (!req.user) throw AppError.unauthorized('Not authenticated');
 
     const userId = (req as any).user?.userId;
-    const user = await User.findById(userId).select('-password');
+    const user = await User.findById(userId)
+      .select('-password')
+      .populate({
+        path: 'profileSubjectPairId',
+        populate: [
+          { path: 'subject1Id', select: 'title subjectKind' },
+          { path: 'subject2Id', select: 'title subjectKind' }
+        ]
+      });
     if (!user) throw AppError.notFound('User not found');
 
     success(res, user);

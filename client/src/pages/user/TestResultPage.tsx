@@ -30,6 +30,7 @@ export const TestResultPage: React.FC = () => {
   const pct = result.result.scorePercent;
   const scoreColor =
     pct >= 80 ? 'text-emerald-600' : pct >= 50 ? 'text-amber-600' : 'text-red-600';
+  const aiFeedback = result.aiFeedback;
 
   const roadmapData = result.roadmap;
   const fromRoadmap = Boolean(locState?.roadmapSubjectId);
@@ -47,6 +48,17 @@ export const TestResultPage: React.FC = () => {
           Правильных ответов: {result.result.correctAnswers} из {result.result.totalQuestions}
         </p>
         <p className={`text-lg font-semibold ${scoreColor}`}>{pct}%</p>
+        {result.solo && (
+          <div className="mt-2 rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-sm text-slate-700">
+            <p>
+              Solo score: <span className="font-semibold text-indigo-700">{result.solo.finalScore}</span>
+            </p>
+            <p>
+              Попытка: <span className="font-medium">{result.solo.attemptType === 'ranked' ? 'рейтинговая' : 'practice'}</span>
+              {result.solo.rank ? ` · место #${result.solo.rank}` : ''}
+            </p>
+          </div>
+        )}
       </div>
 
       {roadmapData && (
@@ -59,10 +71,10 @@ export const TestResultPage: React.FC = () => {
             return (
               <p key={d.nodeId} className="text-sm text-slate-700">
                 <span className="font-medium">{title}</span>:{' '}
-                {d.progressStatus === 'mastered' ? (
+                {d.mastered ? (
                   <span className="font-semibold text-emerald-600">Освоено!</span>
                 ) : (
-                  <span className="text-amber-600">В процессе</span>
+                  <span className="text-amber-600">Продолжайте обучение</span>
                 )}
               </p>
             );
@@ -87,10 +99,20 @@ export const TestResultPage: React.FC = () => {
         </div>
       )}
 
-      <div className="card space-y-4">
-        <h2 className="text-lg font-semibold text-slate-900">Разбор ошибок</h2>
-        <ErrorBreakdown mistakes={result.aiFeedback.mistakes} summary={result.aiFeedback.summary} />
-      </div>
+      {aiFeedback ? (
+        <div className="card space-y-4">
+          <h2 className="text-lg font-semibold text-slate-900">Разбор ошибок</h2>
+          <ErrorBreakdown mistakes={aiFeedback.mistakes} summary={aiFeedback.summary} />
+        </div>
+      ) : (
+        <></>
+        // <div className="card space-y-2">
+        //   <h2 className="text-lg font-semibold text-slate-900">Итог Solo</h2>
+        //   <p className="text-sm text-slate-600">
+        //     Для режима Solo показывается результат и рейтинг без AI-разбора.
+        //   </p>
+        // </div>
+      )}
 
       <div className="flex flex-wrap gap-3">
         {fromRoadmap && roadmapData?.nextRecommended ? (

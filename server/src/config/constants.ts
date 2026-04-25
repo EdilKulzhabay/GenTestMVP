@@ -13,6 +13,8 @@ export const ROUTES = {
   TESTS: '/tests',
   USERS: '/users',
   ROADMAPS: '/roadmaps',
+  TRIAL: '/trial',
+  PROFILE_SUBJECT_PAIRS: '/profile-subject-pairs',
   HEALTH: '/health',
   API_DOCS: '/api-docs'
 } as const;

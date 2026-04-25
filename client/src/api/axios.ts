@@ -17,7 +17,8 @@ axiosInstance.interceptors.response.use(
       if (
         !path.startsWith('/welcome') &&
         !path.startsWith('/login') &&
-        !path.startsWith('/admin/login')
+        !path.startsWith('/admin/login') &&
+        !path.startsWith('/guest')
       ) {
         const returnUrl = encodeURIComponent(path + window.location.search);
         const isAdminPath = path.startsWith('/admin');

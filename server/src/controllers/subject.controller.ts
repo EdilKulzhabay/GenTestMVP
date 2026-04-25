@@ -18,8 +18,13 @@ class SubjectController {
 
   /** POST /subjects */
   async createSubject(req: Request, res: Response): Promise<void> {
-    const { title, description }: ICreateSubjectDTO = req.body;
-    const subject = await Subject.create({ title, description, books: [] });
+    const { title, description, subjectKind }: ICreateSubjectDTO = req.body;
+    const subject = await Subject.create({
+      title,
+      description,
+      subjectKind: subjectKind === 'profile' ? 'profile' : 'main',
+      books: []
+    });
     success(res, subject, 'Subject created successfully', 201);
   }
 
@@ -31,9 +36,13 @@ class SubjectController {
     const existing = await Subject.findOne({ title: title.trim() });
     if (existing) throw AppError.badRequest(`Subject "${title}" already exists`);
 
+    const subjectKind =
+      req.body?.subjectKind === 'profile' ? 'profile' : 'main';
+
     const subject = await Subject.create({
       title: title.trim(),
       description: description || '',
+      subjectKind,
       books: books || []
     });
 
@@ -56,9 +65,14 @@ class SubjectController {
     }, `Imported: ${bookCount} books, ${chapterCount} chapters, ${topicCount} topics, ${paragraphCount} paragraphs`, 201);
   }
 
-  /** GET /subjects */
-  async getAllSubjects(_req: Request, res: Response): Promise<void> {
-    const subjects = await Subject.find().select('title description books createdAt updatedAt');
+  /** GET /subjects — опционально ?subjectKind=main|profile (каталог для выбора профильных пар) */
+  async getAllSubjects(req: Request, res: Response): Promise<void> {
+    const sk = req.query.subjectKind as string | undefined;
+    const filter =
+      sk === 'main' || sk === 'profile' ? { subjectKind: sk as 'main' | 'profile' } : {};
+    const subjects = await Subject.find(filter).select(
+      'title description subjectKind books createdAt updatedAt'
+    );
     success(res, subjects);
   }
 
@@ -137,9 +151,12 @@ class SubjectController {
 
   async updateSubject(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.id);
-    const { title, description } = req.body;
+    const { title, description, subjectKind } = req.body;
     if (title !== undefined) subject.title = title.trim();
     if (description !== undefined) subject.description = description.trim();
+    if (subjectKind === 'main' || subjectKind === 'profile') {
+      (subject as any).subjectKind = subjectKind;
+    }
     await subject.save();
     success(res, subject, 'Subject updated');
   }

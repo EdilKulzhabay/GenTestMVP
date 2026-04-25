@@ -9,7 +9,9 @@ import { ErrorMessage } from '../../components/ui/ErrorMessage';
 import { getApiErrorMessage } from '../../utils/error';
 import { useAuth } from '../../store/auth.store';
 import { getPendingResultReturn, clearPendingResultReturn } from '../../utils/session';
+import { getPendingTrialMerge, clearPendingTrialMerge } from '../../utils/trialSession';
 import { authApi } from '../../api/auth.api';
+import { trialApi } from '../../api/trial.api';
 
 const phoneSchema = z.object({
   phone: z.string().min(10, 'Введите номер телефона (минимум 10 цифр)')
@@ -60,6 +62,17 @@ export const LoginPage: React.FC = () => {
     setServerError(null);
     try {
       const user = await verifyPhone({ phone: pendingPhone, code: values.code });
+      if (user.role === 'user') {
+        const pendingTrial = getPendingTrialMerge();
+        if (pendingTrial?.results?.length) {
+          try {
+            await trialApi.mergePendingIfAny(pendingTrial);
+            clearPendingTrialMerge();
+          } catch {
+            /* перенос пробника не критичен для входа */
+          }
+        }
+      }
       if (returnUrl && user.role === 'user') {
         clearPendingResultReturn();
         navigate(returnUrl, { replace: true });

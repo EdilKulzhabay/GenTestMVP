@@ -5,6 +5,7 @@
 
 export {
   authenticate,
+  optionalAuthenticate,
   authorize,
   isAdmin,
   isUser
@@ -20,3 +21,10 @@ export {
   validate,
   validateRequest
 } from './validation.middleware';
+
+export {
+  roadmapChatUpload,
+  assignRoadmapAttachmentId,
+  ROADMAP_CHAT_MAX_BYTES,
+  ROADMAP_CHAT_UPLOAD_ROOT
+} from './roadmapChatUpload.middleware';

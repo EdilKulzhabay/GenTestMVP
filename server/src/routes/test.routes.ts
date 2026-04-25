@@ -29,7 +29,11 @@ router.post(
     body('fullBook')
       .optional()
       .isBoolean()
-      .withMessage('fullBook must be a boolean')
+      .withMessage('fullBook must be a boolean'),
+    body('testProfile')
+      .optional()
+      .isIn(['regular', 'ent'])
+      .withMessage('testProfile must be regular or ent')
   ],
   validate,
   asyncHandler(testController.generateTestGuest.bind(testController))
@@ -108,7 +112,11 @@ router.post(
     body('fullBook')
       .optional()
       .isBoolean()
-      .withMessage('fullBook must be a boolean')
+      .withMessage('fullBook must be a boolean'),
+    body('testProfile')
+      .optional()
+      .isIn(['regular', 'ent'])
+      .withMessage('testProfile must be regular or ent')
   ],
   validate,
   asyncHandler(testController.generateTest.bind(testController))
@@ -141,6 +149,43 @@ router.post(
   ],
   validate,
   asyncHandler(testController.submitTest.bind(testController))
+);
+
+router.post(
+  '/solo/start',
+  [
+    body('subjectId').isMongoId().withMessage('Invalid subject ID'),
+    body('bookId').isMongoId().withMessage('Invalid book ID'),
+    body('chapterId').optional().isMongoId().withMessage('Invalid chapter ID'),
+    body('fullBook').optional().isBoolean().withMessage('fullBook must be a boolean'),
+    body('testProfile').optional().isIn(['regular', 'ent']).withMessage('testProfile must be regular or ent'),
+    body('mode').isIn(['daily_pack', 'practice']).withMessage('mode must be daily_pack or practice')
+  ],
+  validate,
+  asyncHandler(testController.startSoloTest.bind(testController))
+);
+
+router.post(
+  '/solo/answer',
+  [
+    body('soloSessionId').isMongoId().withMessage('Invalid solo session ID'),
+    body('questionIndex').isInt({ min: 0 }).withMessage('questionIndex must be a non-negative integer'),
+    body('selectedOption').optional().isString().withMessage('selectedOption must be a string')
+  ],
+  validate,
+  asyncHandler(testController.submitSoloAnswer.bind(testController))
+);
+
+router.post(
+  '/solo/finish',
+  [body('soloSessionId').isMongoId().withMessage('Invalid solo session ID')],
+  validate,
+  asyncHandler(testController.finishSoloTest.bind(testController))
+);
+
+router.get(
+  '/solo/leaderboard',
+  asyncHandler(testController.getSoloLeaderboard.bind(testController))
 );
 
 /**

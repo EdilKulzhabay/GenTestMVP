@@ -11,7 +11,8 @@ import { getApiErrorMessage } from '../../utils/error';
 
 const schema = z.object({
   title: z.string().min(1, 'Укажите название'),
-  description: z.string().optional()
+  description: z.string().optional(),
+  subjectKind: z.enum(['main', 'profile'])
 });
 
 type SubjectForm = z.infer<typeof schema>;
@@ -25,13 +26,20 @@ export const SubjectCreatePage: React.FC = () => {
     handleSubmit,
     formState: { errors, isSubmitting },
     reset
-  } = useForm<SubjectForm>({ resolver: zodResolver(schema) });
+  } = useForm<SubjectForm>({
+    resolver: zodResolver(schema),
+    defaultValues: { subjectKind: 'main' }
+  });
 
   const onSubmit = async (values: SubjectForm) => {
     setServerError(null);
     setSuccessMsg(null);
     try {
-      await subjectApi.createSubject(values);
+      await subjectApi.createSubject({
+        title: values.title,
+        description: values.description,
+        subjectKind: values.subjectKind
+      });
       setSuccessMsg('Предмет успешно создан');
       reset();
     } catch (error) {
@@ -46,6 +54,19 @@ export const SubjectCreatePage: React.FC = () => {
       <form className="space-y-4" onSubmit={handleSubmit(onSubmit)}>
         <Input label="Название" placeholder="Например: Математика" error={errors.title?.message} {...register('title')} />
         <Input label="Описание (опционально)" placeholder="Краткое описание предмета" error={errors.description?.message} {...register('description')} />
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-slate-900">Тип предмета</p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="radio" value="main" {...register('subjectKind')} />
+              Основной (общий)
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="radio" value="profile" {...register('subjectKind')} />
+              Профильный (для пары ЕНТ)
+            </label>
+          </div>
+        </div>
         {serverError && <ErrorMessage message={serverError} />}
         {successMsg && <SuccessMessage message={successMsg} />}
         <Button type="submit" isLoading={isSubmitting}>

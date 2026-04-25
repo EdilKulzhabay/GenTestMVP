@@ -1,6 +1,8 @@
 import './env';
+import http from 'http';
 import app from './app';
 import { connectDB } from './config/db';
+import { initSocketServer } from './socket';
 
 /**
  * SERVER ENTRY POINT
@@ -32,12 +34,16 @@ const startServer = async (): Promise<void> => {
     // Подключаемся к MongoDB
     await connectDB();
 
+    const httpServer = http.createServer(app);
+    initSocketServer(httpServer);
+
     // Запускаем сервер
-    app.listen(PORT, () => {
+    httpServer.listen(PORT, () => {
       console.log('🚀 ========================================');
       console.log(`🚀 Server is running on port ${PORT}`);
       console.log(`🚀 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🚀 API URL: http://localhost:${PORT}/api/v1`);
+      console.log(`🚀 Socket URL: http://localhost:${PORT}`);
       console.log('🚀 ========================================');
     });
 

@@ -14,8 +14,8 @@ const getApiBase = (): string => {
 
 export const authApi = {
   async login(payload: LoginRequest): Promise<User> {
-    const { data } = await axiosInstance.post<ApiResponse<AuthPayload>>('/auth/login', payload);
-    return data.data.user;
+    await axiosInstance.post<ApiResponse<AuthPayload>>('/auth/login', payload);
+    return this.getMe();
   },
 
   /** Вход только для роли admin; 403 если пользователь не админ */
@@ -33,13 +33,8 @@ export const authApi = {
   },
 
   async verifyPhone(payload: VerifyPhoneRequest): Promise<User> {
-    const { data } = await axiosInstance.post<ApiResponse<AuthPayload>>(
-      '/auth/verify-phone',
-      payload
-    );
-    const user = data.data?.user;
-    if (!user) throw new Error('Invalid response from server');
-    return user;
+    await axiosInstance.post<ApiResponse<AuthPayload>>('/auth/verify-phone', payload);
+    return this.getMe();
   },
 
   getGoogleAuthUrl(): string {
@@ -49,7 +44,9 @@ export const authApi = {
   },
 
   async getMe(): Promise<User> {
-    const { data } = await axiosInstance.get<ApiResponse<User>>('/auth/me');
-    return data.data;
+    const { data } = await axiosInstance.get<ApiResponse<User & { _id?: string }>>('/auth/me');
+    const u = data.data;
+    const id = u.id || (u as { _id?: string })._id;
+    return { ...u, id: id ?? '' };
   }
 };

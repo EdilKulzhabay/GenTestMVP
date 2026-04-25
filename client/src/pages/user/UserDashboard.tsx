@@ -12,6 +12,7 @@ import { Button } from '../../components/ui/Button';
 import { getApiErrorMessage } from '../../utils/error';
 import { useAuth } from '../../store/auth.store';
 import { saveRoadmapContext } from '../../utils/session';
+import { filterSubjectsForLearner } from '../../utils/learnerSubjects.util';
 
 function scoreColor(pct: number): string {
   if (pct >= 80) return 'text-emerald-600 bg-emerald-50';
@@ -28,6 +29,7 @@ interface ContinueLearningData {
   totalNodes: number;
   masteredNodes: number;
   bookId?: string;
+  chapterId?: string;
 }
 
 export const UserDashboard: React.FC = () => {
@@ -37,6 +39,7 @@ export const UserDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [continueData, setContinueData] = useState<ContinueLearningData | null>(null);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
 
   useEffect(() => {
     const load = async () => {
@@ -48,25 +51,20 @@ export const UserDashboard: React.FC = () => {
           subjectApi.getSubjects().catch(() => [] as Subject[])
         ]);
         setHistory(testsData);
+        const allowed = filterSubjectsForLearner(subjectsData, user);
+        setSubjects(allowed);
 
-        for (const subj of subjectsData) {
+        for (const subj of allowed) {
           try {
             const personal = await roadmapApi.getPersonal(subj._id);
             if (personal.nextRecommended) {
               const nextNode = personal.nodes.find(
                 (n) => n.nodeId === personal.nextRecommended?.nodeId
               );
-              const masteredCount = personal.nodes.filter(
-                (n) => n.progressStatus === 'mastered'
-              ).length;
+              const masteredCount = personal.nodes.filter((n) => n.mastered).length;
 
-              let bookId: string | undefined;
-              try {
-                const can = await roadmapApi.getCanonical(subj._id);
-                bookId = can.sourceMeta?.bookId || subj.books?.[0]?._id;
-              } catch {
-                bookId = subj.books?.[0]?._id;
-              }
+              const bookId = nextNode?.bookId || subj.books?.[0]?._id;
+              const chapterId = nextNode?.chapterId;
 
               setContinueData({
                 subjectId: subj._id,
@@ -76,7 +74,8 @@ export const UserDashboard: React.FC = () => {
                 nextNodeReason: personal.nextRecommended.reason,
                 totalNodes: personal.nodes.length,
                 masteredNodes: masteredCount,
-                bookId
+                bookId,
+                chapterId
               });
               break;
             }
@@ -91,7 +90,7 @@ export const UserDashboard: React.FC = () => {
       }
     };
     void load();
-  }, []);
+  }, [user]);
 
   const handleContinue = () => {
     if (!continueData) return;
@@ -102,23 +101,44 @@ export const UserDashboard: React.FC = () => {
     }
 
     const sessionId = `roadmap-${continueData.subjectId}-${continueData.nextNodeId}-${Date.now()}`;
+    const useChapter = Boolean(continueData.chapterId);
     saveRoadmapContext({
       subjectId: continueData.subjectId,
       nodeId: continueData.nextNodeId,
       nodeTitle: continueData.nextNodeTitle,
       sessionId,
       bookId: continueData.bookId,
-      fullBook: true
+      chapterId: continueData.chapterId,
+      fullBook: !useChapter
     });
 
     navigate('/user/test/start', {
       state: {
         subjectId: continueData.subjectId,
         bookId: continueData.bookId,
-        fullBook: true,
+        ...(continueData.chapterId ? { chapterId: continueData.chapterId } : {}),
+        fullBook: !useChapter,
         roadmapNodeId: continueData.nextNodeId,
         roadmapNodeTitle: continueData.nextNodeTitle,
         roadmapSessionId: sessionId
+      }
+    });
+  };
+
+  const handleSoloDailyPack = () => {
+    const firstSubject = subjects[0];
+    const firstBook = firstSubject?.books?.[0];
+    if (!firstSubject?._id || !firstBook?._id) {
+      navigate('/user/subjects');
+      return;
+    }
+
+    navigate('/user/test/start', {
+      state: {
+        subjectId: firstSubject._id,
+        bookId: firstBook._id,
+        fullBook: true,
+        soloMode: 'daily_pack'
       }
     });
   };
@@ -134,6 +154,9 @@ export const UserDashboard: React.FC = () => {
           <Link to="/user/subjects">
             <Button>Начать тест</Button>
           </Link>
+          <Button variant="outline" onClick={handleSoloDailyPack}>
+            Solo Kahoot (Daily Pack)
+          </Button>
           <Link to="/user/roadmap">
             <Button variant="outline">Карта знаний</Button>
           </Link>

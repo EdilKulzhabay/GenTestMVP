@@ -3,9 +3,14 @@ import { ApiResponse } from '../types/api.types';
 import {
   GeneratedTest,
   GenerateTestRequest,
+  StartSoloTestRequest,
   SubmitTestRequest,
+  SubmitSoloAnswerRequest,
+  SubmitSoloAnswerResponse,
+  FinishSoloTestRequest,
   SubmitTestResponse,
-  TestHistoryItem
+  TestHistoryItem,
+  SoloLeaderboardResponse
 } from '../types/test.types';
 
 export const testApi = {
@@ -16,6 +21,28 @@ export const testApi = {
 
   async submitTest(payload: SubmitTestRequest): Promise<SubmitTestResponse> {
     const { data } = await axiosInstance.post<ApiResponse<SubmitTestResponse>>('/tests/submit', payload);
+    return data.data;
+  },
+
+  async startSoloTest(payload: StartSoloTestRequest): Promise<GeneratedTest> {
+    const { data } = await axiosInstance.post<ApiResponse<GeneratedTest>>('/tests/solo/start', payload);
+    return data.data;
+  },
+
+  async submitSoloAnswer(payload: SubmitSoloAnswerRequest): Promise<SubmitSoloAnswerResponse> {
+    const { data } = await axiosInstance.post<ApiResponse<SubmitSoloAnswerResponse>>('/tests/solo/answer', payload);
+    return data.data;
+  },
+
+  async finishSoloTest(payload: FinishSoloTestRequest): Promise<SubmitTestResponse> {
+    const { data } = await axiosInstance.post<ApiResponse<SubmitTestResponse>>('/tests/solo/finish', payload);
+    return data.data;
+  },
+
+  async getSoloLeaderboard(dailyPackId: string, period: 'today' | 'week' = 'today'): Promise<SoloLeaderboardResponse> {
+    const { data } = await axiosInstance.get<ApiResponse<SoloLeaderboardResponse>>('/tests/solo/leaderboard', {
+      params: { dailyPackId, period }
+    });
     return data.data;
   },
 

@@ -55,10 +55,15 @@ export interface IBook {
   chapters: IChapter[];
 }
 
+/** Предмет: основной (общий) или профильный (для пары ЕНТ) */
+export type SubjectKind = 'main' | 'profile';
+
 export interface ISubject {
   _id?: Types.ObjectId;
   title: string;
   description?: string;
+  /** По умолчанию main; profile — только для пар профильных предметов */
+  subjectKind?: SubjectKind;
   books: IBook[];
   createdAt?: Date;
   updatedAt?: Date;
@@ -116,6 +121,8 @@ export interface IUser {
   password?: string;
   googleId?: string;
   role: UserRole;
+  /** Выбранная пара профильных предметов */
+  profileSubjectPairId?: Types.ObjectId;
   testHistory: ITestHistory[];
   createdAt?: Date;
   updatedAt?: Date;
@@ -127,14 +134,41 @@ export interface IRelatedContent {
   chapterId?: Types.ObjectId;
   topicId?: Types.ObjectId;
   pages: number[];
+  /** Временное поле от LLM до resolveTopicTitleToId */
+  topicTitle?: string;
+}
+
+/** Типы заданий в духе форматов ЕНТ (Казахстан) */
+export type EntQuestionType =
+  | 'single_choice'
+  | 'multiple_choice'
+  | 'matching_single'
+  | 'matching_multiple'
+  | 'short_answer'
+  | 'text_input';
+
+export interface IMatchingItem {
+  id: string;
+  text: string;
 }
 
 export interface IQuestion {
+  questionType?: EntQuestionType;
   questionText: string;
-  options: string[]; // Ровно 4 опции
-  correctOption: string;
   aiExplanation: string;
   relatedContent: IRelatedContent;
+  /** single_choice: 4–5 вариантов */
+  options?: string[];
+  correctOption?: string;
+  /** multiple_choice: подмножество options */
+  correctOptions?: string[];
+  matchingLeft?: IMatchingItem[];
+  matchingRight?: IMatchingItem[];
+  /** matching_single: leftId -> rightId; matching_multiple: leftId -> rightId[] */
+  correctMatching?: Record<string, string | string[]>;
+  acceptableAnswers?: string[];
+  acceptableKeywords?: string[];
+  referenceAnswer?: string;
 }
 
 export interface ITest {
@@ -144,6 +178,7 @@ export interface ITest {
   chapterId?: Types.ObjectId;
   questions: IQuestion[];
   sourceContentHash: string; // Для кеширования
+  testProfile?: TestGenerationProfile;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -184,6 +219,7 @@ export interface IAuthResponse {
 export interface ICreateSubjectDTO {
   title: string;
   description?: string;
+  subjectKind?: SubjectKind;
 }
 
 export interface IAddBookDTO {
@@ -206,6 +242,9 @@ export interface IAddParagraphDTO {
   content: IContent;
 }
 
+/** Режим генерации: обычный (10 MCQ) или профильный как ЕНТ (смешанные типы) */
+export type TestGenerationProfile = 'regular' | 'ent';
+
 // Test Generation DTOs
 export interface IGenerateTestDTO {
   subjectId: string;
@@ -214,6 +253,12 @@ export interface IGenerateTestDTO {
   fullBook?: boolean;
   /** Тема-фокус для генерации (из roadmap-узла). AI сфокусирует вопросы на этой теме */
   topicFocus?: string;
+  /** Узел карты знаний — сервер проверяет, не превышен ли лимит неудачных попыток */
+  roadmapNodeId?: string;
+  /** По умолчанию ent — как раньше для API без поля */
+  testProfile?: TestGenerationProfile;
+  /** Формат ЕНТ: 10, 20, 40… (кратно 10, макс. 120). Пробник задаёт 20/10/10/40/40. */
+  questionCount?: number;
 }
 
 export interface ISubmitTestDTO {
@@ -225,6 +270,8 @@ export interface ISubmitTestDTO {
   /** Опционально: связать сессию теста с узлом roadmap (после submit обновится прогресс) */
   roadmapNodeId?: string;
   roadmapSessionId?: string;
+  /** Пробник: в ответе придут trialTopicMastery (темы ≥ порога) для обновления карты после всех шагов */
+  forTrial?: boolean;
 }
 
 // ==================== AI SERVICE TYPES ====================

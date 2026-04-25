@@ -10,6 +10,8 @@ import { Button } from '../../components/ui/Button';
 import { getApiErrorMessage } from '../../utils/error';
 import { saveRoadmapContext } from '../../utils/session';
 import { RoadmapTreeView } from '../../components/roadmap/RoadmapTreeView';
+import { useAuth } from '../../store/auth.store';
+import { filterSubjectsForLearner, isSubjectAllowedForLearner } from '../../utils/learnerSubjects.util';
 
 const REASON_RU: Record<string, string> = {
   CONTINUE_IN_PROGRESS: 'Вы уже начали эту тему',
@@ -20,6 +22,7 @@ const REASON_RU: Record<string, string> = {
 };
 
 export const KnowledgeMapPage: React.FC = () => {
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const subjectId = searchParams.get('subjectId');
@@ -33,6 +36,7 @@ export const KnowledgeMapPage: React.FC = () => {
   const [personal, setPersonal] = useState<PersonalRoadmapResponse | null>(null);
   const [loading, setLoading] = useState(Boolean(subjectId));
   const [error, setError] = useState<string | null>(null);
+  const [mapActionError, setMapActionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (subjectId) return;
@@ -41,7 +45,7 @@ export const KnowledgeMapPage: React.FC = () => {
       setError(null);
       try {
         const data = await subjectApi.getSubjects();
-        setSubjects(data);
+        setSubjects(filterSubjectsForLearner(data, user));
       } catch (err) {
         setError(getApiErrorMessage(err));
       } finally {
@@ -49,7 +53,7 @@ export const KnowledgeMapPage: React.FC = () => {
       }
     };
     void load();
-  }, [subjectId]);
+  }, [subjectId, user]);
 
   useEffect(() => {
     if (!subjectId) {
@@ -66,6 +70,12 @@ export const KnowledgeMapPage: React.FC = () => {
       setPersonal(null);
       try {
         const subj = await subjectApi.getSubjectById(subjectId);
+        if (!isSubjectAllowedForLearner(user, subj)) {
+          setError('Этот предмет недоступен для вашего профиля.');
+          setSearchParams({});
+          setLoading(false);
+          return;
+        }
         setSubjectTitle(subj.title);
         setSubject(subj);
       } catch {
@@ -95,7 +105,7 @@ export const KnowledgeMapPage: React.FC = () => {
       }
     };
     void load();
-  }, [subjectId]);
+  }, [subjectId, user, setSearchParams]);
 
   const selectSubject = (id: string) => {
     setSearchParams({ subjectId: id });
@@ -106,17 +116,42 @@ export const KnowledgeMapPage: React.FC = () => {
     return new Map(personal.nodes.map((n) => [n.nodeId, n]));
   }, [personal]);
 
+  const handleOpenChat = (openNodeId: string) => {
+    if (!subjectId) return;
+    navigate(
+      `/user/roadmap/chat?subjectId=${encodeURIComponent(subjectId)}&nodeId=${encodeURIComponent(
+        openNodeId
+      )}`
+    );
+  };
+
   const handleStartTestForNode = (nodeId: string) => {
     if (!subjectId || !subject) return;
 
-    const bookId = canonical?.sourceMeta?.bookId || subject.books?.[0]?._id;
-    if (!bookId) return;
+    const pNode = personal?.nodes.find((n) => n.nodeId === nodeId);
+    if (pNode?.knowledgeMapTestBlocked) {
+      setMapActionError(
+        'По этой теме тест временно закрыт: три раза меньше 80%. Откройте «Материал урока», повторите тему и нажмите «Освоил».'
+      );
+      return;
+    }
+    setMapActionError(null);
 
-    const node = personal?.nodes.find((n) => n.nodeId === nodeId)
+    const node = pNode
       || canonical?.nodes.find((n) => n.nodeId === nodeId);
     const nodeTitle = node?.title || nodeId;
 
+    const bookId =
+      node && 'bookId' in node && node.bookId
+        ? node.bookId
+        : canonical?.sourceMeta?.bookId || subject.books?.[0]?._id;
+    if (!bookId) return;
+
+    const chapterId =
+      node && 'chapterId' in node && node.chapterId ? node.chapterId : undefined;
+
     const sessionId = `roadmap-${subjectId}-${nodeId}-${Date.now()}`;
+    const useChapter = Boolean(chapterId);
 
     saveRoadmapContext({
       subjectId,
@@ -124,14 +159,16 @@ export const KnowledgeMapPage: React.FC = () => {
       nodeTitle,
       sessionId,
       bookId,
-      fullBook: true
+      chapterId,
+      fullBook: !useChapter
     });
 
     navigate('/user/test/start', {
       state: {
         subjectId,
         bookId,
-        fullBook: true,
+        ...(chapterId ? { chapterId } : {}),
+        fullBook: !useChapter,
         roadmapNodeId: nodeId,
         roadmapNodeTitle: nodeTitle,
         roadmapSessionId: sessionId
@@ -206,7 +243,8 @@ export const KnowledgeMapPage: React.FC = () => {
               Статичная карта
             </h2>
             <p className="text-sm text-slate-500">
-              Общая структура тем для этого предмета (одинакова для всех). Версия {canonical.version},
+              Структура по темам внутри глав (обновляется при изменении структуры учебника). Версия{' '}
+              {canonical.version},
               узлов: {canonical.nodes.length}.
             </p>
             {canonical.description ? (
@@ -231,7 +269,7 @@ export const KnowledgeMapPage: React.FC = () => {
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
             Древовидная структура (ветви по prerequisites)
           </p>
-          <RoadmapTreeView mode="canonical" nodes={canonical.nodes} />
+          <RoadmapTreeView mode="canonical" nodes={canonical.nodes} routePrefix="/user" />
         </section>
       )}
 
@@ -242,7 +280,7 @@ export const KnowledgeMapPage: React.FC = () => {
               Ваш прогресс
             </h2>
             <p className="text-sm text-slate-500">
-              Доступность узлов, баллы и рекомендации по вашим попыткам.
+              Доступность узлов, флаг «освоено» и рекомендации следующего шага.
             </p>
           </div>
 
@@ -265,12 +303,35 @@ export const KnowledgeMapPage: React.FC = () => {
                   personal.nextRecommended.nodeId}
               </p>
               <p className="mt-1 text-xs text-slate-600">{personal.nextRecommended.reason}</p>
-              <Button
-                onClick={() => handleStartTestForNode(personal.nextRecommended!.nodeId)}
-                className="mt-3 text-sm"
-              >
-                Пройти тест по этой теме
-              </Button>
+              {(() => {
+                const nr = personal.nodes.find((n) => n.nodeId === personal.nextRecommended?.nodeId);
+                const blocked = nr?.knowledgeMapTestBlocked === true;
+                return (
+                  <>
+                    {blocked && (
+                      <p className="mt-2 text-xs text-rose-800">
+                        Тест по этой теме закрыт после трёх попыток ниже 80%. Сначала пройдите{' '}
+                        <Link
+                          to={`/user/roadmap/material?subjectId=${encodeURIComponent(
+                            subjectId!
+                          )}&nodeId=${encodeURIComponent(personal.nextRecommended!.nodeId)}`}
+                          className="font-medium underline"
+                        >
+                          материал
+                        </Link>{' '}
+                        и нажмите «Освоил».
+                      </p>
+                    )}
+                    <Button
+                      onClick={() => handleStartTestForNode(personal.nextRecommended!.nodeId)}
+                      className="mt-3 text-sm"
+                      disabled={blocked}
+                    >
+                      Пройти тест по этой теме
+                    </Button>
+                  </>
+                );
+              })()}
             </div>
           )}
 
@@ -280,25 +341,35 @@ export const KnowledgeMapPage: React.FC = () => {
                 Рекомендованные темы
               </p>
               <ul className="mt-2 space-y-2">
-                {personal.topRecommendations.map((rec) => (
-                  <li key={rec.nodeId} className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-900">{rec.title}</p>
-                      <p className="text-xs text-slate-500">{REASON_RU[rec.reason] ?? rec.reason}</p>
-                    </div>
-                    <Button
-                      onClick={() => handleStartTestForNode(rec.nodeId)}
-                      variant="outline"
-                      className="shrink-0 text-xs"
-                    >
-                      Пройти тест
-                    </Button>
-                  </li>
-                ))}
+                {personal.topRecommendations.map((rec) => {
+                  const pn = personal.nodes.find((n) => n.nodeId === rec.nodeId);
+                  const blocked = pn?.knowledgeMapTestBlocked === true;
+                  return (
+                    <li key={rec.nodeId} className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-900">{rec.title}</p>
+                        <p className="text-xs text-slate-500">{REASON_RU[rec.reason] ?? rec.reason}</p>
+                      </div>
+                      <Button
+                        onClick={() => handleStartTestForNode(rec.nodeId)}
+                        variant="outline"
+                        className="shrink-0 text-xs"
+                        disabled={blocked}
+                      >
+                        Пройти тест
+                      </Button>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
 
+          {mapActionError && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+              {mapActionError}
+            </div>
+          )}
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
             Ваш прогресс на дереве тем
           </p>
@@ -306,7 +377,10 @@ export const KnowledgeMapPage: React.FC = () => {
             mode="personal"
             nodes={personal.nodes}
             personalById={personalById}
+            subjectId={subjectId ?? undefined}
             onStartTest={handleStartTestForNode}
+            onOpenChat={handleOpenChat}
+            routePrefix="/user"
           />
         </section>
       )}

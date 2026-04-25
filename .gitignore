@@ -1,1 +1,4 @@
 deploy/
+
+# Загрузки roadmap-чата / локальные uploads
+server/uploads/

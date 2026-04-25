@@ -133,6 +133,13 @@ const SubjectSchema = new Schema<ISubjectDocument>({
     trim: true,
     maxlength: 1000
   },
+  /** Основные предметы (общие) vs профильные (для выбора пары ЕНТ) */
+  subjectKind: {
+    type: String,
+    enum: ['main', 'profile'],
+    default: 'main',
+    index: true
+  },
   books: [BookSchema]
 }, { 
   timestamps: true,

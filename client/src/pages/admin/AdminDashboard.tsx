@@ -122,6 +122,9 @@ export const AdminDashboard: React.FC = () => {
           <Link to="/admin/subjects/new">
             <Button>+ Добавить предмет</Button>
           </Link>
+          <Link to="/admin/profile-subject-pairs">
+            <Button variant="outline">Пары профилей</Button>
+          </Link>
         </div>
       </div>
 
@@ -166,6 +169,11 @@ export const AdminDashboard: React.FC = () => {
                   <div className="min-w-0 flex-1">
                     <h2 className="truncate text-base font-semibold text-slate-900 group-hover:text-blue-700">
                       {subject.title}
+                      {subject.subjectKind === 'profile' && (
+                        <span className="ml-2 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-800">
+                          профиль
+                        </span>
+                      )}
                     </h2>
                     {subject.description && (
                       <p className="mt-1 line-clamp-2 text-sm text-slate-500">

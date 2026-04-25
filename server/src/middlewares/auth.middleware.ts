@@ -18,6 +18,39 @@ import { User } from '../models';
  * Проверяет JWT токен в заголовке Authorization
  * Добавляет информацию о пользователе в req.user
  */
+/**
+ * Если есть валидный JWT — заполняет req.user; иначе просто next (без 401).
+ */
+export const optionalAuthenticate = async (
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const cookieToken = req.cookies?.token;
+    const authHeader = req.headers.authorization;
+    const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
+    const token = cookieToken || headerToken;
+    if (!token) {
+      next();
+      return;
+    }
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      next();
+      return;
+    }
+    const decoded = jwt.verify(token, jwtSecret) as IJWTPayload;
+    const user = await User.findById(decoded.userId);
+    if (user) {
+      (req as any).user = { userId: decoded.userId, role: decoded.role };
+    }
+  } catch {
+    // гость или просроченный токен
+  }
+  next();
+};
+
 export const authenticate = async (
   req: Request,
   res: Response,
