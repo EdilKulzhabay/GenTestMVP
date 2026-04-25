@@ -51,7 +51,8 @@ router.post(
     body('title')
       .trim()
       .isLength({ min: 1, max: 200 })
-      .withMessage('Title is required')
+      .withMessage('Title is required'),
+    body('updateIfExists').optional().isBoolean().withMessage('updateIfExists must be boolean')
   ],
   validate,
   asyncHandler(subjectController.importSubject.bind(subjectController))

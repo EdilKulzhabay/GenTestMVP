@@ -17,6 +17,7 @@ export const AdminDashboard: React.FC = () => {
   const [importLoading, setImportLoading] = useState(false);
   const [importError, setImportError] = useState('');
   const [importSuccess, setImportSuccess] = useState('');
+  const [importUpdateIfExists, setImportUpdateIfExists] = useState(false);
 
   const loadSubjects = async () => {
     setLoading(true);
@@ -52,7 +53,9 @@ export const AdminDashboard: React.FC = () => {
         setImportLoading(true);
         setImportError('');
         setImportSuccess('');
-        const res = await subjectApi.importSubject(parsed);
+        const res = await subjectApi.importSubject(
+          importUpdateIfExists ? { ...parsed, updateIfExists: true } : parsed
+        );
         setImportSuccess(
           `«${parsed.title}» импортирован: ${res.stats.books} книг, ${res.stats.chapters} глав, ${res.stats.topics} тем, ${res.stats.paragraphs} параграфов`
         );
@@ -101,30 +104,41 @@ export const AdminDashboard: React.FC = () => {
       {importError && <ErrorMessage message={importError} />}
 
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <h1 className="section-title">Предметы</h1>
-        <div className="flex items-center gap-2">
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".json,application/json"
-            className="hidden"
-            onChange={handleImportFile}
-          />
-          <Button
-            variant="outline"
-            onClick={() => fileRef.current?.click()}
-            isLoading={importLoading}
-            disabled={importLoading}
-          >
-            📥 Импорт JSON
-          </Button>
-          <Link to="/admin/subjects/new">
-            <Button>+ Добавить предмет</Button>
-          </Link>
-          <Link to="/admin/profile-subject-pairs">
-            <Button variant="outline">Пары профилей</Button>
-          </Link>
+        <div className="flex flex-col items-stretch gap-2 sm:items-end">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+            <Button
+              variant="outline"
+              onClick={() => fileRef.current?.click()}
+              isLoading={importLoading}
+              disabled={importLoading}
+            >
+              📥 Импорт JSON
+            </Button>
+            <Link to="/admin/subjects/new">
+              <Button>+ Добавить предмет</Button>
+            </Link>
+            <Link to="/admin/profile-subject-pairs">
+              <Button variant="outline">Пары профилей</Button>
+            </Link>
+          </div>
+          <label className="flex max-w-md cursor-pointer items-start gap-2 text-right text-sm text-slate-600 sm:text-right">
+            <input
+              type="checkbox"
+              className="mt-1 rounded border-slate-300"
+              checked={importUpdateIfExists}
+              onChange={(e) => setImportUpdateIfExists(e.target.checked)}
+            />
+            <span>При совпадении названия — обновить из JSON: тип предмета, описание, книги</span>
+          </label>
         </div>
       </div>
 

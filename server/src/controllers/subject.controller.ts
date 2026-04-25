@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { Subject } from '../models';
 import {
   ICreateSubjectDTO,
@@ -33,8 +34,54 @@ class SubjectController {
     const { title, description, books } = req.body;
     if (!title) throw AppError.badRequest('title is required');
 
+    const updateIfExists = req.body?.updateIfExists === true;
     const existing = await Subject.findOne({ title: title.trim() });
-    if (existing) throw AppError.badRequest(`Subject "${title}" already exists`);
+    if (existing && !updateIfExists) {
+      throw AppError.badRequest(
+        `Subject "${title}" already exists. Pass "updateIfExists": true in JSON to refresh description, subjectKind and books.`
+      );
+    }
+    if (existing && updateIfExists) {
+      const subjectKind = req.body?.subjectKind === 'profile' ? 'profile' : 'main';
+      const booksArr = Array.isArray(books) ? books : [];
+      await Subject.updateOne(
+        { _id: existing._id },
+        {
+          $set: {
+            description: description != null ? String(description).trim() : existing.description,
+            subjectKind,
+            books: booksArr
+          }
+        }
+      );
+      const subject = await Subject.findById(existing._id);
+      if (!subject) throw AppError.notFound('Subject not found');
+      const bookCount = subject.books?.length ?? 0;
+      const chapterCount = subject.books.reduce((s: number, b: any) => s + (b.chapters?.length ?? 0), 0);
+      const topicCount = subject.books.reduce(
+        (s: number, b: any) => s + b.chapters.reduce((cs: number, c: any) => cs + (c.topics?.length ?? 0), 0),
+        0
+      );
+      const paragraphCount = subject.books.reduce(
+        (s: number, b: any) =>
+          s +
+          b.chapters.reduce(
+            (cs: number, c: any) => cs + c.topics.reduce((ts: number, t: any) => ts + (t.paragraphs?.length ?? 0), 0),
+            0
+          ),
+        0
+      );
+      success(
+        res,
+        {
+          subject,
+          stats: { books: bookCount, chapters: chapterCount, topics: topicCount, paragraphs: paragraphCount }
+        },
+        'Subject updated from import',
+        200
+      );
+      return;
+    }
 
     const subjectKind =
       req.body?.subjectKind === 'profile' ? 'profile' : 'main';
@@ -150,14 +197,35 @@ class SubjectController {
   }
 
   async updateSubject(req: Request, res: Response): Promise<void> {
-    const subject = await this.findSubject(req.params.id);
+    const id = String(req.params.id);
+    if (!mongoose.isValidObjectId(id)) throw AppError.badRequest('Invalid subject id');
+
     const { title, description, subjectKind } = req.body;
-    if (title !== undefined) subject.title = title.trim();
-    if (description !== undefined) subject.description = description.trim();
-    if (subjectKind === 'main' || subjectKind === 'profile') {
-      (subject as any).subjectKind = subjectKind;
+    const $set: Record<string, string> = {};
+    if (title !== undefined) {
+      const t = String(title).trim();
+      if (!t) throw AppError.badRequest('title cannot be empty');
+      $set.title = t;
     }
-    await subject.save();
+    if (description !== undefined) {
+      $set.description = String(description).trim();
+    }
+    if (subjectKind !== undefined) {
+      const sk = String(subjectKind).trim();
+      if (sk !== 'main' && sk !== 'profile') {
+        throw AppError.badRequest('subjectKind must be main or profile');
+      }
+      $set.subjectKind = sk;
+    }
+
+    if (Object.keys($set).length === 0) {
+      const subject = await this.findSubject(id);
+      success(res, subject, 'Subject updated');
+      return;
+    }
+
+    const subject = await Subject.findByIdAndUpdate(id, { $set }, { new: true, runValidators: true });
+    if (!subject) throw AppError.notFound('Subject not found');
     success(res, subject, 'Subject updated');
   }
 
