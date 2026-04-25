@@ -33,7 +33,14 @@ const swaggerSpec = {
         'Пробное тестирование (ВНО): конфиг, план из 5 блоков, перенос результатов ≥ 80% по теме на personal roadmap (POST apply-results)'
     },
     { name: 'Roadmaps', description: 'Canonical roadmap (карта знаний), Personal roadmap (прогресс), рекомендации, урок, «освоил», чат' },
-    { name: 'Users', description: 'Профиль, история тестов, статистика (требует auth)' },
+    {
+      name: 'Users',
+      description: 'Профиль, пара профильных предметов (PUT profile-subjects / PATCH profile-subject-pair), история тестов, статистика'
+    },
+    {
+      name: 'Profile subject pairs',
+      description: 'Каталог разрешённых пар профильных предметов (для выбора учеником). CRUD — admin, GET — auth'
+    },
     { name: 'System', description: 'Health check, отладка' }
   ],
   components: {
@@ -207,6 +214,7 @@ const swaggerSpec = {
           _id: { type: 'string' },
           title: { type: 'string' },
           description: { type: 'string' },
+          subjectKind: { type: 'string', enum: ['main', 'profile'], description: 'Основной (ВНО) или профильный' },
           books: { type: 'array', items: { $ref: '#/components/schemas/Book' } },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' }
@@ -215,10 +223,13 @@ const swaggerSpec = {
       ImportSubjectRequest: {
         type: 'object',
         required: ['title'],
-        description: 'Полная структура предмета для импорта. Содержит books → chapters → topics → paragraphs.',
+        description:
+          'Полная структура предмета для импорта. Содержит books → chapters → topics → paragraphs. `updateIfExists: true` — обновить существующий предмет с тем же title (тип, описание, книги).',
         properties: {
           title: { type: 'string', example: 'География' },
           description: { type: 'string', example: 'География 7 класс' },
+          subjectKind: { type: 'string', enum: ['main', 'profile'], description: 'По умолчанию main' },
+          updateIfExists: { type: 'boolean', description: 'Если true и предмет с таким title есть — перезаписать' },
           books: {
             type: 'array',
             items: {
@@ -263,6 +274,38 @@ const swaggerSpec = {
             }
           }
         }
+      },
+      ProfileSubjectPair: {
+        type: 'object',
+        description: 'После populate subject*Id — объекты с title и subjectKind',
+        properties: {
+          _id: { type: 'string' },
+          title: { type: 'string' },
+          pairKey: { type: 'string' },
+          subject1Id: { type: 'object' },
+          subject2Id: { type: 'object' }
+        }
+      },
+      PutProfileSubjectsRequest: {
+        type: 'object',
+        description:
+          'Поле `subjectIds`: null или [] — сброс. Ровно два id — смена пары; оба subjectKind: profile, пара из каталога (GET /profile-subject-pairs).',
+        properties: {
+          subjectIds: { nullable: true, type: 'array', items: { type: 'string' }, description: 'null, [] или [id, id]' }
+        }
+      },
+      PatchProfileSubjectPairIdRequest: {
+        type: 'object',
+        required: ['profileSubjectPairId'],
+        description: 'null или "" — сброс; иначе id пары из GET /profile-subject-pairs',
+        properties: {
+          profileSubjectPairId: { nullable: true, type: 'string', description: 'Mongo id пары или null' }
+        }
+      },
+      RebuildCanonicalFromTopicsRequest: {
+        type: 'object',
+        required: ['subjectId'],
+        properties: { subjectId: { type: 'string', description: 'Mongo id предмета' } }
       },
       ImportSubjectResponse: {
         type: 'object',
@@ -896,6 +939,19 @@ const swaggerSpec = {
         }
       }
     },
+    '/auth/login/admin': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Вход в админ-панель (только role=admin)',
+        description: 'Принимает тот же JSON, что и `POST /auth/login`, но отклоняет не-админов (403), чтобы отделить публичную и админскую форму входа.',
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/LoginRequest' } } } },
+        responses: {
+          200: { description: 'Вход администратора, cookie установлена', content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthResponse' } } } },
+          401: { description: 'Неверные данные или учётка без пароля', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          403: { description: 'Пользователь не администратор', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } }
+        }
+      }
+    },
     '/auth/me': {
       get: {
         tags: ['Auth'],
@@ -916,6 +972,15 @@ const swaggerSpec = {
         summary: 'Список всех предметов',
         operationId: 'getSubjects',
         description: 'Публичный. Возвращает предметы с массивом books (для выбора в UI).',
+        parameters: [
+          {
+            name: 'subjectKind',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['main', 'profile'] },
+            description: 'Фильтр: только основные или только профильные'
+          }
+        ],
         responses: {
           200: {
             description: 'Массив предметов',
@@ -929,7 +994,19 @@ const swaggerSpec = {
         security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         requestBody: {
           required: true,
-          content: { 'application/json': { schema: { type: 'object', required: ['title'], properties: { title: { type: 'string', maxLength: 200 }, description: { type: 'string', maxLength: 1000 } } } } }
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['title'],
+                properties: {
+                  title: { type: 'string', maxLength: 200 },
+                  description: { type: 'string', maxLength: 1000 },
+                  subjectKind: { type: 'string', enum: ['main', 'profile'] }
+                }
+              }
+            }
+          }
         },
         responses: {
           201: { description: 'Предмет создан', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/Subject' } } } } } },
@@ -942,15 +1019,17 @@ const swaggerSpec = {
       post: {
         tags: ['Subjects'],
         summary: 'Импорт предмета целиком (admin)',
-        description: 'Создаёт предмет со всей вложенной структурой: книги → главы → темы → параграфы. Принимает JSON-файл (например, subject.json).',
+        description:
+          'Создаёт предмет со всей вложенной структурой. При `updateIfExists: true` и совпадении `title` — обновляет описание, subjectKind и дерево книг (ответ 200).',
         security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { $ref: '#/components/schemas/ImportSubjectRequest' } } }
         },
         responses: {
-          201: { description: 'Предмет импортирован', content: { 'application/json': { schema: { $ref: '#/components/schemas/ImportSubjectResponse' } } } },
-          400: { description: 'Предмет уже существует / невалидные данные', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          201: { description: 'Создан новый предмет', content: { 'application/json': { schema: { $ref: '#/components/schemas/ImportSubjectResponse' } } } },
+          200: { description: 'Существующий предмет обновлён (updateIfExists: true)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ImportSubjectResponse' } } } },
+          400: { description: 'Предмет уже существует без updateIfExists / невалидные данные', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           401: { description: 'Не авторизован' },
           403: { description: 'Нет прав (не admin)' }
         }
@@ -1071,9 +1150,23 @@ const swaggerSpec = {
       patch: {
         tags: ['Subjects'],
         summary: 'Обновить предмет (admin)',
+        description: 'Частичное обновление: title, description, subjectKind (main | profile).',
         security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { title: { type: 'string' }, description: { type: 'string' } } } } } },
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string' },
+                  description: { type: 'string' },
+                  subjectKind: { type: 'string', enum: ['main', 'profile'] }
+                }
+              }
+            }
+          }
+        },
         responses: { 200: { description: 'Обновлено' }, 404: { description: 'Не найден' } }
       },
       delete: {
@@ -1642,6 +1735,78 @@ const swaggerSpec = {
         }
       }
     },
+    '/roadmaps/admin/rebuild-from-topics': {
+      post: {
+        tags: ['Roadmaps'],
+        summary: 'Пересобрать canonical из тем учебника (admin)',
+        description:
+          'Детерминированно строит узлы 1:1 с темами книг предмета (линейные prerequisites), обновляет CanonicalRoadmap в БД.',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/RebuildCanonicalFromTopicsRequest' } } }
+        },
+        responses: {
+          200: {
+            description: 'subjectId, version, nodesCount',
+            content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { type: 'object' } } } } }
+          },
+          400: { description: 'Нет subjectId' }
+        }
+      }
+    },
+
+    // ==================== PROFILE SUBJECT PAIRS (каталог пар) ====================
+    '/profile-subject-pairs': {
+      get: {
+        tags: ['Profile subject pairs'],
+        summary: 'Список разрешённых пар профильных предметов',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        responses: {
+          200: { description: 'Массив пар (populate title, subjectKind)', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { type: 'array', items: { $ref: '#/components/schemas/ProfileSubjectPair' } } } } } } }
+        }
+      },
+      post: {
+        tags: ['Profile subject pairs'],
+        summary: 'Создать пару (admin)',
+        description: 'Оба subjectId — предметы с subjectKind: profile, пара не дублирует существующую',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['subject1Id', 'subject2Id'],
+                properties: { subject1Id: { type: 'string' }, subject2Id: { type: 'string' } }
+              }
+            }
+          }
+        },
+        responses: {
+          201: { description: 'Создано', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, data: { $ref: '#/components/schemas/ProfileSubjectPair' } } } } } }
+        }
+      }
+    },
+    '/profile-subject-pairs/{id}': {
+      patch: {
+        tags: ['Profile subject pairs'],
+        summary: 'Обновить пару (admin)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          content: { 'application/json': { schema: { type: 'object', properties: { subject1Id: { type: 'string' }, subject2Id: { type: 'string' } } } } }
+        },
+        responses: { 200: { description: 'Обновлено' } }
+      },
+      delete: {
+        tags: ['Profile subject pairs'],
+        summary: 'Удалить пару (admin)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { 200: { description: 'Удалено' } }
+      }
+    },
 
     // ==================== USERS ====================
     '/users/me': {
@@ -1653,6 +1818,25 @@ const swaggerSpec = {
           200: { description: 'Профиль' },
           401: { description: 'Не авторизован' }
         }
+      }
+    },
+    '/users/me/profile-subjects': {
+      put: {
+        tags: ['Users'],
+        summary: 'Задать пару предметов по двум id (оба — profile, из каталога пар)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PutProfileSubjectsRequest' } } } },
+        responses: { 200: { description: 'Пользователь с populate profileSubjectPairId' } }
+      }
+    },
+    '/users/me/profile-subject-pair': {
+      patch: {
+        tags: ['Users'],
+        summary: 'Привязать пару по id каталога или сбросить (legacy)',
+        description: 'Тело: profileSubjectPairId — Mongo id из GET /profile-subject-pairs, либо null',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PatchProfileSubjectPairIdRequest' } } } },
+        responses: { 200: { description: 'Пользователь обновлён' } }
       }
     },
     '/users/me/tests': {
