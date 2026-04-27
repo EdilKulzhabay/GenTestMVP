@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { subjectApi } from '../../api/subject.api';
 import { Subject } from '../../types/subject.types';
 import { Loader } from '../../components/ui/Loader';
@@ -9,8 +9,12 @@ import { useGuestMode } from '../../hooks/useGuestMode';
 import { useAuth } from '../../store/auth.store';
 import { filterSubjectsForLearner } from '../../utils/learnerSubjects.util';
 
+type SubjectSelectLocation = { nextFlow?: 'liveKahoot' };
+
 export const SubjectSelectPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const nextFlow = (location.state as SubjectSelectLocation | null)?.nextFlow;
   const { basePath, isGuest } = useGuestMode();
   const { user } = useAuth();
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -36,6 +40,11 @@ export const SubjectSelectPage: React.FC = () => {
   return (
     <div className="space-y-4">
       <h1 className="section-title">Выберите предмет</h1>
+      {nextFlow === 'liveKahoot' ? (
+        <p className="text-sm text-slate-600">
+          Live Kahoot: затем выберите книгу — тест подставится из последнего сохранённого по предмету или сгенерируется.
+        </p>
+      ) : null}
       {loading ? <Loader /> : null}
       {error ? <ErrorMessage message={error} /> : null}
       {!loading && !error && subjects.length === 0 ? (
@@ -47,7 +56,9 @@ export const SubjectSelectPage: React.FC = () => {
             <button
               key={subject._id}
               className="card text-left transition hover:border-blue-200 hover:bg-blue-50"
-              onClick={() => navigate(`${basePath}/books`, { state: { subjectId: subject._id } })}
+              onClick={() =>
+                navigate(`${basePath}/books`, { state: { subjectId: subject._id, ...(nextFlow ? { nextFlow } : {}) } })
+              }
             >
               <h2 className="text-lg font-semibold text-slate-900">{subject.title}</h2>
               <p className="text-sm text-slate-600">{subject.description || 'Без описания'}</p>

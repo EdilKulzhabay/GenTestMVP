@@ -144,20 +144,7 @@ export const UserDashboard: React.FC = () => {
   };
 
   const handleLiveKahootHost = () => {
-    const firstSubject = subjects[0];
-    const firstBook = firstSubject?.books?.[0];
-    if (!firstSubject?._id || !firstBook?._id) {
-      navigate('/user/subjects');
-      return;
-    }
-    navigate('/user/test/start', {
-      state: {
-        subjectId: firstSubject._id,
-        bookId: firstBook._id,
-        fullBook: true,
-        kahootLiveHost: true
-      }
-    });
+    navigate('/user/subjects', { state: { nextFlow: 'liveKahoot' as const } });
   };
 
   return (

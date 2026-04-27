@@ -1,23 +1,36 @@
 import { io, Socket } from 'socket.io-client';
 import type { TestQuestion } from '../types/test.types';
 
-/** Без VITE_API_URL в dev — тот же origin что и фронт (5173), Vite проксирует /socket.io на сервер. */
-const socketBase =
-  import.meta.env.VITE_API_URL != null && String(import.meta.env.VITE_API_URL).length > 0
-    ? String(import.meta.env.VITE_API_URL).replace(/\/api\/v\d+$/, '')
-    : import.meta.env.DEV
-      ? typeof window !== 'undefined'
-        ? window.location.origin
-        : 'http://localhost:5173'
-      : 'http://localhost:5000';
+/**
+ * База URL для Socket.IO (тот же хост, что и API / фронт в prod).
+ * Если задан VITE_API_URL — берём origin из него; иначе в браузере — window.location.origin
+ * (важно для https://domain без .env: иначе был бы localhost:5000 и wss ломался).
+ *
+ * Nginx: нужен proxy на /socket.io/ с Upgrade (WebSocket), иначе оставьте polling (см. transports ниже).
+ */
+const socketBase: string = (() => {
+  const raw = import.meta.env.VITE_API_URL;
+  if (raw != null && String(raw).length > 0) {
+    return String(raw).replace(/\/api\/v\d+$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+  return import.meta.env.DEV ? 'http://localhost:5173' : 'http://localhost:5000';
+})();
 
 let soloSocket: Socket | null = null;
 
 export const getSoloSocket = (): Socket => {
   if (soloSocket) return soloSocket;
   soloSocket = io(socketBase, {
+    path: '/socket.io/',
     withCredentials: true,
-    transports: ['websocket', 'polling']
+    /** Сначала polling: часто проходит за прокси, где WebSocket не проброшен; затем upgrade */
+    transports: ['polling', 'websocket'],
+    reconnection: true,
+    reconnectionDelay: 1000,
+    timeout: 20000
   });
   return soloSocket;
 };
@@ -67,4 +80,3 @@ export interface SoloFinishAck {
     rank: number | null;
   };
 }
-

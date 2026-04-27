@@ -12,6 +12,7 @@ import { isSubjectAllowedForLearner } from '../../utils/learnerSubjects.util';
 
 interface LocationState {
   subjectId?: string;
+  nextFlow?: 'liveKahoot';
 }
 
 export const BookSelectPage: React.FC = () => {
@@ -21,6 +22,7 @@ export const BookSelectPage: React.FC = () => {
   const { user } = useAuth();
   const state = location.state as LocationState | null;
   const subjectId = state?.subjectId;
+  const nextFlow = state?.nextFlow;
 
   const [subject, setSubject] = useState<Subject | null>(null);
   const [selectedBookId, setSelectedBookId] = useState<string>('');
@@ -90,6 +92,9 @@ export const BookSelectPage: React.FC = () => {
       <div>
         <h1 className="section-title">Выберите книгу</h1>
         <p className="muted-text">Предмет: {subject.title}</p>
+        {nextFlow === 'liveKahoot' ? (
+          <p className="mt-1 text-sm text-slate-600">Далее — генерация или подстановка последнего теста по выбранному предмету.</p>
+        ) : null}
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -151,7 +156,8 @@ export const BookSelectPage: React.FC = () => {
                   subjectId,
                   bookId: selectedBook._id,
                   chapterId: fullBook ? undefined : selectedChapterId,
-                  fullBook
+                  fullBook,
+                  ...(nextFlow === 'liveKahoot' ? { kahootLiveHost: true } : {})
                 }
               })
             }
