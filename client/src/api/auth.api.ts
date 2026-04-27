@@ -8,7 +8,9 @@ import {
 } from '../types/auth.types';
 
 const getApiBase = (): string => {
-  const url = import.meta.env.VITE_API_URL ?? 'http://localhost:5000/api/v1';
+  const url =
+    import.meta.env.VITE_API_URL ??
+    (import.meta.env.DEV ? '/api/v1' : 'http://localhost:5000/api/v1');
   return url.startsWith('http') ? url : `${window.location.origin}${url}`;
 };
 

@@ -24,6 +24,8 @@ import { BookSelectPage } from '../pages/user/BookSelectPage';
 import { TestStartPage } from '../pages/user/TestStartPage';
 import { TestPage } from '../pages/user/TestPage';
 import { TestResultPage } from '../pages/user/TestResultPage';
+import { LiveKahootJoinPage } from '../pages/user/LiveKahootJoinPage';
+import { LiveKahootRoomPage } from '../pages/user/LiveKahootRoomPage';
 import { TestHistoryDetailPage } from '../pages/user/TestHistoryDetailPage';
 import { KnowledgeMapPage } from '../pages/user/KnowledgeMapPage';
 import { RoadmapChatPage } from '../pages/user/RoadmapChatPage';
@@ -130,7 +132,9 @@ export const router = createBrowserRouter([
           { path: '/user/test/start', element: <TestStartPage /> },
           { path: '/user/test', element: <TestPage /> },
           { path: '/user/test/result', element: <TestResultPage /> },
-          { path: '/user/tests/:testHistoryId', element: <TestHistoryDetailPage /> }
+          { path: '/user/tests/:testHistoryId', element: <TestHistoryDetailPage /> },
+          { path: '/user/kahoot/join', element: <LiveKahootJoinPage /> },
+          { path: '/user/kahoot/room', element: <LiveKahootRoomPage /> }
         ]
       }
     ]

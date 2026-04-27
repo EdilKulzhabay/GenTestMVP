@@ -1,8 +1,15 @@
 import { io, Socket } from 'socket.io-client';
 import type { TestQuestion } from '../types/test.types';
 
-const apiBase = import.meta.env.VITE_API_URL ?? 'http://localhost:5000/api/v1';
-const socketBase = apiBase.replace(/\/api\/v\d+$/, '');
+/** Без VITE_API_URL в dev — тот же origin что и фронт (5173), Vite проксирует /socket.io на сервер. */
+const socketBase =
+  import.meta.env.VITE_API_URL != null && String(import.meta.env.VITE_API_URL).length > 0
+    ? String(import.meta.env.VITE_API_URL).replace(/\/api\/v\d+$/, '')
+    : import.meta.env.DEV
+      ? typeof window !== 'undefined'
+        ? window.location.origin
+        : 'http://localhost:5173'
+      : 'http://localhost:5000';
 
 let soloSocket: Socket | null = null;
 

@@ -143,6 +143,23 @@ export const UserDashboard: React.FC = () => {
     });
   };
 
+  const handleLiveKahootHost = () => {
+    const firstSubject = subjects[0];
+    const firstBook = firstSubject?.books?.[0];
+    if (!firstSubject?._id || !firstBook?._id) {
+      navigate('/user/subjects');
+      return;
+    }
+    navigate('/user/test/start', {
+      state: {
+        subjectId: firstSubject._id,
+        bookId: firstBook._id,
+        fullBook: true,
+        kahootLiveHost: true
+      }
+    });
+  };
+
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -157,6 +174,15 @@ export const UserDashboard: React.FC = () => {
           <Button variant="outline" onClick={handleSoloDailyPack}>
             Solo Kahoot (Daily Pack)
           </Button>
+          <Button variant="outline" onClick={handleLiveKahootHost}>
+            Создать Live Kahoot
+          </Button>
+          <Link
+            to="/user/kahoot/join"
+            className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            Присоединиться к Live Kahoot
+          </Link>
           <Link to="/user/roadmap">
             <Button variant="outline">Карта знаний</Button>
           </Link>

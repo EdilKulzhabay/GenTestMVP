@@ -1,7 +1,10 @@
 import axios from 'axios';
 import { authStore } from '../store/auth.store';
 
-const baseURL = import.meta.env.VITE_API_URL ?? 'http://localhost:5000/api/v1';
+/** В dev без .env запросы идут через прокси Vite → тот же порт, что и API (см. vite.config `proxy`). */
+const baseURL =
+  import.meta.env.VITE_API_URL ??
+  (import.meta.env.DEV ? '/api/v1' : 'http://localhost:5000/api/v1');
 
 export const axiosInstance = axios.create({
   baseURL,

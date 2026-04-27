@@ -5,8 +5,19 @@ import { SoloAttempt, SoloSession, Test, User } from '../models';
 import { AppError } from '../utils';
 import { gradeAnswer, sanitizeQuestionForClient } from '../utils/entQuestion.util';
 import { IQuestion, IJWTPayload } from '../types';
+import {
+  createLiveRoom,
+  tryJoinByPin,
+  setReady,
+  startLiveGame,
+  submitLiveAnswer,
+  rejoinLiveRoom,
+  onLiveUserDisconnect,
+  initLiveKahootIo,
+  leaveLiveLobby
+} from '../services/liveKahoot.service';
 
-type AuthSocket = Socket & { userId?: string };
+type AuthSocket = Socket & { userId?: string; liveRoomId?: string };
 
 const SOLO_QUESTION_TIME_LIMIT_SEC = 15;
 
@@ -32,6 +43,8 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
     cors: { origin: true, credentials: true }
   });
 
+  initLiveKahootIo(io);
+
   io.use(async (socket: AuthSocket, next) => {
     try {
       const jwtSecret = process.env.JWT_SECRET;
@@ -54,6 +67,151 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
   });
 
   io.on('connection', (socket: AuthSocket) => {
+    if (socket.userId) {
+      void socket.join(`user:${socket.userId}`);
+    }
+    const joinLiveChannel = (roomId: string) => {
+      if (socket.liveRoomId) {
+        void socket.leave(`live:${socket.liveRoomId}`);
+      }
+      socket.liveRoomId = roomId;
+      void socket.join(`live:${roomId}`);
+    };
+
+    socket.on('live:create', async (payload: { testId: string }, ack?: (data: any) => void) => {
+      try {
+        if (!socket.userId) throw AppError.unauthorized('Not authenticated');
+        const { testId } = payload || {};
+        if (!testId) throw AppError.badRequest('testId is required');
+        const { roomId, pin, state } = await createLiveRoom(socket.userId, testId);
+        joinLiveChannel(roomId);
+        ack?.({ success: true, roomId, pin, state });
+      } catch (error: any) {
+        ack?.({ success: false, message: error.message || 'Не удалось создать комнату' });
+      }
+    });
+
+    socket.on('live:join', (payload: { pin: string }, ack?: (data: any) => void) => {
+      try {
+        if (!socket.userId) throw AppError.unauthorized('Not authenticated');
+        const { pin } = payload || {};
+        if (!pin) throw AppError.badRequest('pin is required');
+        const result = tryJoinByPin(socket.userId, pin);
+        if (!result.ok) {
+          if (result.code === 'ALREADY_STARTED') {
+            ack?.({ success: false, code: 'ALREADY_STARTED', message: 'Live Kahoot уже начался, присоединиться нельзя' });
+            return;
+          }
+          ack?.({ success: false, code: 'NOT_FOUND', message: 'Код не найден' });
+          return;
+        }
+        joinLiveChannel(result.roomId);
+        ack?.({ success: true, roomId: result.roomId, state: result.state });
+      } catch (error: any) {
+        ack?.({ success: false, message: error.message || 'Join failed' });
+      }
+    });
+
+    socket.on('live:lobby_leave', (payload: { roomId: string }, ack?: (data: any) => void) => {
+      try {
+        if (!socket.userId) throw AppError.unauthorized('Not authenticated');
+        const { roomId } = payload || {};
+        if (!roomId) throw AppError.badRequest('roomId is required');
+        const did = leaveLiveLobby(socket.userId, roomId);
+        if (did && socket.liveRoomId === roomId) {
+          void socket.leave(`live:${roomId}`);
+          delete socket.liveRoomId;
+        }
+        ack?.({ success: true });
+      } catch (error: any) {
+        ack?.({ success: false, message: error.message || 'leave failed' });
+      }
+    });
+
+    socket.on('live:rejoin', (payload: { roomId: string }, ack?: (data: any) => void) => {
+      try {
+        if (!socket.userId) throw AppError.unauthorized('Not authenticated');
+        const { roomId } = payload || {};
+        if (!roomId) throw AppError.badRequest('roomId is required');
+        const r = rejoinLiveRoom(socket.userId, roomId);
+        if (!r.ok) {
+          ack?.({ success: false, code: r.code, message: 'Не удалось вернуться в комнату' });
+          return;
+        }
+        joinLiveChannel(roomId);
+        ack?.({ success: true, state: r.state });
+      } catch (error: any) {
+        ack?.({ success: false, message: error.message || 'Rejoin failed' });
+      }
+    });
+
+    socket.on('live:ready', (payload: { roomId: string; ready: boolean }, ack?: (data: any) => void) => {
+      try {
+        if (!socket.userId) throw AppError.unauthorized('Not authenticated');
+        const { roomId, ready } = payload || {};
+        if (!roomId) throw AppError.badRequest('roomId is required');
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[socket:live:ready] вход', {
+            userId: socket.userId,
+            roomId: String(roomId),
+            ready: Boolean(ready)
+          });
+        }
+        const r = setReady(socket.userId, roomId, Boolean(ready));
+        if (!r.ok) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('[socket:live:ready] отказ', { message: r.message, debug: r.debug });
+          }
+          ack?.({ success: false, message: r.message, debug: r.debug });
+          return;
+        }
+        ack?.({ success: true });
+      } catch (error: any) {
+        console.warn('[socket:live:ready] исключение', error?.message || error);
+        ack?.({ success: false, message: error.message || 'ready failed' });
+      }
+    });
+
+    socket.on('live:host_start', (payload: { roomId: string }, ack?: (data: any) => void) => {
+      try {
+        if (!socket.userId) throw AppError.unauthorized('Not authenticated');
+        const { roomId } = payload || {};
+        if (!roomId) throw AppError.badRequest('roomId is required');
+        const r = startLiveGame(socket.userId, roomId);
+        if (!r.ok) {
+          ack?.({ success: false, message: r.message });
+          return;
+        }
+        ack?.({ success: true });
+      } catch (error: any) {
+        ack?.({ success: false, message: error.message || 'start failed' });
+      }
+    });
+
+    socket.on(
+      'live:submit_answer',
+      (payload: { roomId: string; questionIndex: number; selectedOption: string }, ack?: (data: any) => void) => {
+        try {
+          if (!socket.userId) throw AppError.unauthorized('Not authenticated');
+          const { roomId, questionIndex, selectedOption } = payload || {};
+          if (!roomId) throw AppError.badRequest('roomId is required');
+          if (typeof questionIndex !== 'number') throw AppError.badRequest('questionIndex is required');
+          const r = submitLiveAnswer(socket.userId, roomId, questionIndex, selectedOption || '');
+          if (!r.ok) {
+            ack?.({ success: false, message: r.message });
+            return;
+          }
+          ack?.({ success: true });
+        } catch (error: any) {
+          ack?.({ success: false, message: error.message || 'submit failed' });
+        }
+      }
+    );
+
+    socket.on('disconnect', () => {
+      onLiveUserDisconnect(socket.userId || '', socket.liveRoomId);
+    });
+
     socket.on('solo:join', async (payload: { soloSessionId: string }, ack?: (data: any) => void) => {
       try {
         const { soloSessionId } = payload || {};

@@ -28,6 +28,8 @@ interface LocationState {
   trialFlow?: boolean;
   trialQuestionCount?: number;
   trialBlockLabel?: string;
+  /** Сгенерировать тест и открыть лобби Live Kahoot (не Solo) */
+  kahootLiveHost?: boolean;
 }
 
 export const TestStartPage: React.FC = () => {
@@ -39,6 +41,7 @@ export const TestStartPage: React.FC = () => {
   const subjectId = state?.subjectId;
   const bookId = state?.bookId;
   const chapterId = state?.chapterId;
+  const kahootLiveHost = Boolean(!isGuest && state?.kahootLiveHost);
   const trialFlow = Boolean(state?.trialFlow);
   const fullBook = trialFlow ? (state?.fullBook ?? true) : (state?.fullBook ?? false);
   const trialQuestionCount = state?.trialQuestionCount;
@@ -50,13 +53,12 @@ export const TestStartPage: React.FC = () => {
   const [subject, setSubject] = useState<Subject | null>(null);
   const [loading, setLoading] = useState(true);
   const [testProfile, setTestProfile] = useState<TestGenerationProfile>('regular');
-  const [soloMode, setSoloMode] = useState<'classic' | 'daily_pack' | 'practice'>(
-    trialFlow
-      ? 'classic'
-      : state?.soloMode === 'daily_pack' || state?.soloMode === 'practice'
-        ? state.soloMode
-        : 'classic'
-  );
+  const [soloMode, setSoloMode] = useState<'classic' | 'daily_pack' | 'practice'>(() => {
+    if (trialFlow) return 'classic';
+    if (state?.kahootLiveHost) return 'classic';
+    if (state?.soloMode === 'daily_pack' || state?.soloMode === 'practice') return state.soloMode;
+    return 'classic';
+  });
   const [generateState, setGenerateState] = useState<TestGenerationState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const queueShown = useRef(false);
@@ -192,6 +194,11 @@ export const TestStartPage: React.FC = () => {
         saveRoadmapContext(ctx);
       }
 
+      if (kahootLiveHost) {
+        setTimeout(() => navigate('/user/kahoot/room', { state: { role: 'host' } }), 400);
+        return;
+      }
+
       setTimeout(() => navigate(`${basePath}/test`), 400);
     } catch (err) {
       clearTimeout(t);
@@ -226,7 +233,14 @@ export const TestStartPage: React.FC = () => {
 
   return (
     <div className="card space-y-5">
-      <h1 className="section-title">{trialFlow ? 'Пробное тестирование' : 'Подтверждение'}</h1>
+      <h1 className="section-title">
+        {trialFlow ? 'Пробное тестирование' : kahootLiveHost ? 'Live Kahoot — подготовка' : 'Подтверждение'}
+      </h1>
+      {kahootLiveHost ? (
+        <p className="rounded-lg border border-violet-100 bg-violet-50/80 px-3 py-2 text-sm text-violet-900">
+          Сгенерируйте вопросы: затем откроется лобби с 6-значным кодом, который можно передать друзьям.
+        </p>
+      ) : null}
       <div className="text-sm text-slate-600 space-y-1">
         <p>Предмет: {subject?.title}</p>
         <p>Книга: {book?.title}</p>
@@ -299,7 +313,7 @@ export const TestStartPage: React.FC = () => {
         </div>
       )}
 
-      {!trialFlow ? (
+      {!trialFlow && !kahootLiveHost ? (
       <div className="space-y-2">
         <p className="text-sm font-medium text-slate-900">Режим</p>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -398,7 +412,7 @@ export const TestStartPage: React.FC = () => {
       ) : null}
 
       {error ? <ErrorMessage message={error} /> : null}
-      <Button onClick={handleGenerate}>Начать тест</Button>
+      <Button onClick={handleGenerate}>{kahootLiveHost ? 'Сгенерировать и открыть лобби' : 'Начать тест'}</Button>
     </div>
   );
 };

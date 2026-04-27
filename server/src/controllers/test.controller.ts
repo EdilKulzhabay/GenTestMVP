@@ -22,8 +22,25 @@ import {
 import { assertLearnerSubjectAccess } from '../utils/learnerSubjectAccess.util';
 import { computeTrialTopicMasteryRows } from '../utils/trialTopicMastery.util';
 
+/**
+ * ВРЕМЕННО: не вызывать AI — брать последний сохранённый Test по `subjectId` (newest first).
+ * Вернуть генерацию: выставить `false` (и убрать ветки `if (USE_LAST_CREATED_TEST_FROM_DB)` ниже).
+ */
+const USE_LAST_CREATED_TEST_FROM_DB = true;
+
 class TestController {
   private static readonly SOLO_QUESTION_TIME_LIMIT_SEC = 15;
+
+  /** Последний тест по предмету из БД (для отладки без генерации). */
+  private async takeLastTestFromDb(subjectId: string) {
+    const test = await Test.findOne({ subjectId }).sort({ createdAt: -1 });
+    if (!test) {
+      throw AppError.notFound(
+        'В БД нет тестов для этого предмета. Добавьте тест или отключите режим USE_LAST_DB_TEST / USE_LAST_CREATED_TEST_FROM_DB.'
+      );
+    }
+    return test;
+  }
 
   private buildDailyPackId(input: {
     subjectId: string;
@@ -271,6 +288,11 @@ class TestController {
   /** POST /tests/generate-guest */
   async generateTestGuest(req: Request, res: Response): Promise<void> {
     const dto: IGenerateTestDTO = req.body;
+    if (USE_LAST_CREATED_TEST_FROM_DB) {
+      const test = await this.takeLastTestFromDb(dto.subjectId);
+      success(res, this.sanitize(test), 'Test loaded from DB (dev, no generation)', 201);
+      return;
+    }
     const { contentForAI, book } = await resolveBookContentForAI(dto);
     const genOpts =
       typeof dto.questionCount === 'number' && dto.questionCount > 0
@@ -305,6 +327,11 @@ class TestController {
     const userId = (req as any).user?.userId;
     await assertLearnerSubjectAccess(userId, dto.subjectId);
     await roadmapService.assertKnowledgeMapTestAllowed(userId, dto.subjectId, dto.roadmapNodeId);
+    if (USE_LAST_CREATED_TEST_FROM_DB) {
+      const test = await this.takeLastTestFromDb(dto.subjectId);
+      success(res, this.sanitize(test), 'Test loaded from DB (dev, no generation)', 201);
+      return;
+    }
     const { contentForAI, book } = await resolveBookContentForAI(dto);
 
     const user = await User.findById(userId);
@@ -393,26 +420,32 @@ class TestController {
       dateKey
     });
 
-    let test = await Test.findOne({
-      subjectId: dto.subjectId,
-      bookId: dto.bookId,
-      chapterId: dto.chapterId || { $exists: false },
-      testProfile: this.normalizeTestProfile(dto),
-      sourceContentHash: dailyPackId
-    }).sort({ createdAt: -1 });
+    let test: InstanceType<typeof Test> | null;
 
-    if (!test) {
-      const { contentForAI, book } = await resolveBookContentForAI(dto);
-      const generated = await aiService.generateTest(contentForAI, [], this.normalizeTestProfile(dto));
-      this.resolveTopicTitleToId(generated, book);
-      test = await Test.create({
+    if (USE_LAST_CREATED_TEST_FROM_DB) {
+      test = await this.takeLastTestFromDb(dto.subjectId);
+    } else {
+      test = await Test.findOne({
         subjectId: dto.subjectId,
         bookId: dto.bookId,
-        chapterId: dto.chapterId || undefined,
-        questions: generated.questions,
-        sourceContentHash: dailyPackId,
-        testProfile: this.normalizeTestProfile(dto)
-      });
+        chapterId: dto.chapterId || { $exists: false },
+        testProfile: this.normalizeTestProfile(dto),
+        sourceContentHash: dailyPackId
+      }).sort({ createdAt: -1 });
+
+      if (!test) {
+        const { contentForAI, book } = await resolveBookContentForAI(dto);
+        const generated = await aiService.generateTest(contentForAI, [], this.normalizeTestProfile(dto));
+        this.resolveTopicTitleToId(generated, book);
+        test = await Test.create({
+          subjectId: dto.subjectId,
+          bookId: dto.bookId,
+          chapterId: dto.chapterId || undefined,
+          questions: generated.questions,
+          sourceContentHash: dailyPackId,
+          testProfile: this.normalizeTestProfile(dto)
+        });
+      }
     }
 
     /** Один ranked daily pack в календарный день на пользователя, независимо от предмета/книги */
