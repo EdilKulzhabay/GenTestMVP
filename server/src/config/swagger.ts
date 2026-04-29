@@ -5,15 +5,28 @@ const swaggerSpec = {
   info: {
     title: 'Edu AI API',
     version: '1.0.0',
-    description: `API платформы для AI-генерации тестов по учебному контенту.
+    description: `## Обзор
 
-**Авторизация:** OTP (WhatsApp/Telegram) или Google OAuth. JWT передаётся в cookie \`token\` или в заголовке \`Authorization: Bearer <token>\`.
+Платформа для AI-генерации тестов по учебному контенту.
 
-**Структура контента:** Subject → Book → Chapter → Topic → Paragraph.
+## Авторизация
 
-**Базовый путь REST:** \`${API_BASE_PATH}\`
+OTP (WhatsApp/Telegram) или Google OAuth. JWT: cookie \`token\` или заголовок \`Authorization: Bearer <token>\`.
 
-**Socket.IO (Live Kahoot, Solo Kahoot):** не входит в этот JSON REST; подключение клиента к хосту приложения (обычно тот же домен, что и фронт) по пути \`/socket.io/\` (Engine.IO v4). Авторизация — JWT в cookie \`token\` или в \`auth.token\` при connect. Подробно — тег **Socket.IO**.`,
+## Модель данных
+
+Иерархия: **Subject** → **Book** → **Chapter** → **Topic** → **Paragraph**.
+
+## REST
+
+Базовый путь всех HTTP-эндпоинтов в этой спецификации: \`${API_BASE_PATH}\`.
+
+## Live Kahoot
+
+Режим игры в реальном времени (ведущий + участники по коду). Реализован **не через REST**, а через **Socket.IO** (путь \`/socket.io/\`).
+
+- Подготовка теста: тег **Tests** (\`POST …/tests/generate\` и др.).
+- Комната и события: тег **Socket.IO** (схемы \`LiveKahoot*\` в **Components**).`,
     contact: { name: 'Edu AI', url: 'https://kakoi-to-do-men.ru' }
   },
   servers: [
@@ -26,8 +39,22 @@ const swaggerSpec = {
     { name: 'Subjects', description: 'Предметы, книги, главы, темы, параграфы. CRUD (admin), публичный список' },
     {
       name: 'Tests',
-      description:
-        'Генерация (auth/guest) с `questionCount`, отправка ответов (`forTrial`), Solo (daily pack / practice, REST + см. события `solo:*` у тега Socket.IO). Live Kahoot: подготовьте тест этим же API (`POST …/tests/generate` и др.), затем в socket `live:create { testId }`. Привязка гостевого теста — `claim-guest`.'
+      description: `### Назначение
+
+Генерация тестов (с аккаунтом и в гостевом режиме), отправка результатов, режим **Solo**.
+
+### Live Kahoot и REST
+
+1. Получить \`testId\`: \`POST …/tests/generate\` (или логика сохранённого теста).
+2. Перейти к сокет-событиям: тег **Socket.IO**, событие \`live:create\`.
+
+### Solo
+
+REST-эндпоинты \`/tests/solo/*\` плюс события \`solo:*\` на том же сокете — см. тег **Socket.IO**.
+
+### Прочее
+
+Привязка гостевого результата к пользователю: \`POST …/tests/claim-guest\`.`
     },
     {
       name: 'Trial',
@@ -45,34 +72,68 @@ const swaggerSpec = {
     },
     {
       name: 'Socket.IO',
-      description: `Реалтайм не по HTTP из этой спецификации: тот же процесс Node, что REST (порт из \`process.env.PORT\`). Клиент Socket.IO (EIO=4) использует путь \`/socket.io/\` (polling + upgrade на WebSocket при необходимости). **Nginx:** нужен \`location /socket.io/ { proxy_pass … }\` на upstream Node, иначе клиент получит HTML SPA и не подключится.
+      description: `## 1. Назначение
 
-**Авторизация:** только зарегистрированные пользователи — JWT в HTTP-only cookie \`token\` или \`socket.handshake.auth.token\` (строка \`Bearer …\` поддерживается middleware).
+Реалтайм поверх того же Node-процесса, что и REST (**порт** \`process.env.PORT\`). В OpenAPI здесь нет отдельных «операций»: клиент подключается по **Engine.IO v4** (\`EIO=4\`) к пути \`/socket.io/\` (polling, затем при необходимости WebSocket).
 
-#### Live Kahoot — события client → server (третий аргумент = ack)
+## 2. Подключение и прокси
 
-| Событие | Payload | Успешный ack | Ошибки |
-|---------|---------|--------------|--------|
-| \`live:create\` | \`LiveKahootSocketCreatePayload\` | \`{ success: true, roomId, pin, state }\` | \`{ success: false, message }\` |
-| \`live:join\` | \`LiveKahootSocketJoinPayload\` | \`{ success: true, roomId, state }\` | \`{ success: false, code: 'NOT_FOUND' \\| 'ALREADY_STARTED', message }\` |
-| \`live:lobby_leave\` | \`{ roomId }\` | \`{ success: true }\` | \`{ success: false, message }\` |
-| \`live:rejoin\` | \`{ roomId }\` | \`{ success: true, state }\` | \`{ success: false, code: 'NOT_FOUND' \\| 'NOT_MEMBER', message }\` |
-| \`live:ready\` | \`{ roomId, ready }\` | \`{ success: true }\` | \`{ success: false, message, debug? }\` |
-| \`live:host_start\` | \`{ roomId }\` | \`{ success: true }\` | текстовые \`message\` (нет прав, уже игра и т.д.) |
-| \`live:submit_answer\` | \`LiveKahootSocketSubmitAnswerPayload\` | \`{ success: true }\` | например уже ответили, время вышло |
+| Тема | Что сделать |
+|------|-------------|
+| Один хост с SPA | Nginx: \`location /socket.io/\` → \`proxy_pass\` на upstream с Node (как API). Без этого отдаётся \`index.html\` — сокет не установится. |
+| JWT | Только авторизованные: cookie \`token\` **или** \`socket.handshake.auth.token\` (допустимо \`Bearer <jwt>\`). |
 
-#### Live Kahoot — server → client
+## 3. Live Kahoot
 
-| Событие | Назначение |
-|---------|-------------|
-| \`live:room_state\` | Персонифицированный снимок комнаты: схема \`LiveKahootRoomStatePayload\` (в том числе \`revision\`, \`pin\`, \`participants\`, \`me\`, активный вопрос в фазе \`playing\`). |
-| \`live:room_closed\` | \`{ reason?: 'host_left' \\| … }\` — закрытие комнаты (напр. выход хоста). |
+### 3.1. Идея
 
-#### Solo (сессионный режим того же socket)
+Ведущий создаёт комнату по уже существующему \`testId\`; участники вводят **6-значный PIN**. Далее лобби → старт ведущим → вопросы и очки в реальном времени.
 
-После создания Solo-сессии по REST можно пользоваться событиями \`solo:join\`, \`solo:answer\`, \`solo:finish\` (см. схемы \`SocketSolo*\` ниже).
+### 3.2. Поток (сверху вниз)
 
-Сценарий Live Kahoot как UI: генерация или выбор теста по REST (**POST ${API_BASE_PATH}/tests/generate** и т.д.) → сохранённый **testId** → \`live:create\` с этим id.`
+| Шаг | Действие |
+|-----|----------|
+| A | REST **Tests**: \`POST ${API_BASE_PATH}/tests/generate\` (или иной сценарий) → \`testId\`. |
+| B | Событие \`live:create\` с \`testId\` → в ack: \`roomId\`, \`pin\`, \`state\`. |
+| C | Участники: \`live:join\` с PIN; после перезагрузки страницы: \`live:rejoin\` с \`roomId\`. |
+| D | Лобби: \`live:ready\`; ведущий: \`live:host_start\`. |
+| E | Раунды: \`live:submit_answer\`; состояние в \`live:room_state\` (схема **LiveKahootRoomStatePayload**). |
+
+### 3.3. События: клиент → сервер
+
+Третий аргумент \`emit\` — функция **ack** (ответ на запрос).
+
+#### Комната и лобби
+
+| Событие | Тело (payload) | При успехе (ack) |
+|---------|----------------|------------------|
+| \`live:create\` | **LiveKahootSocketCreatePayload** | \`success\`, \`roomId\`, \`pin\`, \`state\` |
+| \`live:join\` | **LiveKahootSocketJoinPayload** | \`success\`, \`roomId\`, \`state\` |
+| \`live:rejoin\` | \`{ roomId }\` | \`success\`, \`state\` |
+| \`live:lobby_leave\` | \`{ roomId }\` | \`success: true\` |
+
+Типичные **коды ошибок** (где есть): \`NOT_FOUND\`, \`ALREADY_STARTED\` (join); \`NOT_FOUND\`, \`NOT_MEMBER\` (rejoin); иначе поле \`message\`.
+
+#### Готовность, старт, ответ
+
+| Событие | Тело | При успехе |
+|---------|------|------------|
+| \`live:ready\` | \`{ roomId, ready }\` | \`success: true\` |
+| \`live:host_start\` | \`{ roomId }\` | \`success: true\` |
+| \`live:submit_answer\` | **LiveKahootSocketSubmitAnswerPayload** | \`success: true\` |
+
+При ошибке ack обычно \`success: false\` и \`message\`; для \`live:ready\` возможен объект \`debug\`.
+
+### 3.4. События: сервер → клиент
+
+| Событие | Payload |
+|---------|---------|
+| \`live:room_state\` | Снимок комнаты (**LiveKahootRoomStatePayload**): фаза \`lobby\` / \`playing\` / \`finished\`, участники, вопрос, счёт. |
+| \`live:room_closed\` | Например \`{ reason: 'host_left' }\` — комната больше недоступна. |
+
+## 4. Solo Kahoot (тот же сокет)
+
+После создания сессии через REST используйте последовательность \`solo:join\` → \`solo:answer\` → \`solo:finish\`. Схемы: **SocketSolo*** в **Components**.`
     },
     { name: 'System', description: 'Health check, отладка' }
   ],
@@ -330,7 +391,8 @@ const swaggerSpec = {
       LiveKahootSocketCreatePayload: {
         type: 'object',
         required: ['testId'],
-        description: 'Ведущий создаёт комнату после выбора/генерации теста по REST (Mongo id тем же теста)',
+        description:
+          'Ведущий передаёт id теста, полученный из REST после генерации или выбора сохранённого теста (тег **Tests**).',
         properties: {
           testId: { type: 'string', description: 'Mongo id документа Test' }
         }
@@ -354,7 +416,7 @@ const swaggerSpec = {
       LiveKahootRoomStatePayload: {
         type: 'object',
         description:
-          'Снимок состояния в `live:room_state` и в ack `state`; поля могут быть `null`/опущены при смене фазы. Сервер санитизирует вопрос (без ответа).',
+          'Единый объект состояния для **live:room_state** и для **state** в ack (create / join / rejoin). Набор полей зависит от фазы: лобби, активный вопрос или финальное табло. Вопрос клиенту без раскрытия правильного ответа.',
         properties: {
           revision: { type: 'integer' },
           type: {
