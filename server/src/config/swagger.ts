@@ -35,7 +35,7 @@ const swaggerSpec = {
     { name: 'Roadmaps', description: 'Canonical roadmap (карта знаний), Personal roadmap (прогресс), рекомендации, урок, «освоил», чат' },
     {
       name: 'Users',
-      description: 'Профиль, пара профильных предметов (PUT profile-subjects / PATCH profile-subject-pair), история тестов, статистика'
+      description: 'Профиль, пара профильных предметов (PATCH profile-subject-pair), история тестов, статистика'
     },
     {
       name: 'Profile subject pairs',
@@ -284,14 +284,6 @@ const swaggerSpec = {
           pairKey: { type: 'string' },
           subject1Id: { type: 'object' },
           subject2Id: { type: 'object' }
-        }
-      },
-      PutProfileSubjectsRequest: {
-        type: 'object',
-        description:
-          'Поле `subjectIds`: null или [] — сброс. Ровно два id — смена пары; оба subjectKind: profile, пара из каталога (GET /profile-subject-pairs).',
-        properties: {
-          subjectIds: { nullable: true, type: 'array', items: { type: 'string' }, description: 'null, [] или [id, id]' }
         }
       },
       PatchProfileSubjectPairIdRequest: {
@@ -1820,20 +1812,11 @@ const swaggerSpec = {
         }
       }
     },
-    '/users/me/profile-subjects': {
-      put: {
-        tags: ['Users'],
-        summary: 'Задать пару предметов по двум id (оба — profile, из каталога пар)',
-        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
-        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PutProfileSubjectsRequest' } } } },
-        responses: { 200: { description: 'Пользователь с populate profileSubjectPairId' } }
-      }
-    },
     '/users/me/profile-subject-pair': {
       patch: {
         tags: ['Users'],
-        summary: 'Привязать пару по id каталога или сбросить (legacy)',
-        description: 'Тело: profileSubjectPairId — Mongo id из GET /profile-subject-pairs, либо null',
+        summary: 'Привязать пару по id каталога или сбросить',
+        description: 'Тело: profileSubjectPairId — Mongo id из GET /profile-subject-pairs, либо null или ""',
         security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PatchProfileSubjectPairIdRequest' } } } },
         responses: { 200: { description: 'Пользователь обновлён' } }

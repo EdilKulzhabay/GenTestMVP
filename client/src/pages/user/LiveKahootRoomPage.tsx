@@ -17,6 +17,9 @@ type LocationSt = {
 
 const QUESTION_TIME_LIMIT_SEC = 15;
 
+const SOCKET_PROXY_HINT =
+  'Не удалось подключиться к Socket.IO. Часто по адресу /socket.io/ отдаётся HTML вместо бэкенда — на сервере nginx нужно проксировать /socket.io/ на процесс Node (тот же порт, что и API).';
+
 const normalizeState = (raw: unknown): LiveRoomStatePayload | null => {
   if (!raw || typeof raw !== 'object') return null;
   return raw as LiveRoomStatePayload;
@@ -39,6 +42,21 @@ export const LiveKahootRoomPage: React.FC = () => {
   const applyRoomState = useCallback((raw: unknown) => {
     const s = normalizeState(raw);
     if (s) setRoom(s);
+  }, []);
+
+  const roomRef = useRef(room);
+  roomRef.current = room;
+
+  useEffect(() => {
+    const socket = getLiveKahootSocket();
+    const onConnectError = () => {
+      if (roomRef.current) return;
+      setError((prev) => prev ?? SOCKET_PROXY_HINT);
+    };
+    socket.on('connect_error', onConnectError);
+    return () => {
+      socket.off('connect_error', onConnectError);
+    };
   }, []);
 
   useEffect(() => {

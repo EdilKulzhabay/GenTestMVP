@@ -10,14 +10,6 @@ type Props = {
   onComplete: () => void;
 };
 
-function pairSubjectIds(pair: ProfileSubjectPair): [string, string] {
-  const a = pair.subject1Id;
-  const b = pair.subject2Id;
-  const id1 = typeof a === 'object' && a?._id ? a._id : (a as string);
-  const id2 = typeof b === 'object' && b?._id ? b._id : (b as string);
-  return [String(id1), String(id2)];
-}
-
 export const ProfilePairRequiredModal: React.FC<Props> = ({ onComplete }) => {
   const [pairs, setPairs] = useState<ProfileSubjectPair[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,8 +41,7 @@ export const ProfilePairRequiredModal: React.FC<Props> = ({ onComplete }) => {
     setSaving(true);
     setError(null);
     try {
-      const ids = pairSubjectIds(pair);
-      await userApi.putProfileSubjects(ids);
+      await userApi.setProfileSubjectPair(pair._id);
       onComplete();
     } catch (e) {
       setError(getApiErrorMessage(e));

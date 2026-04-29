@@ -1,6 +1,5 @@
 import { Router } from 'express';
-import mongoose from 'mongoose';
-import { body, param, query } from 'express-validator';
+import { param, query } from 'express-validator';
 import { userController } from '../controllers';
 import { authenticate, asyncHandler, validate } from '../middlewares';
 
@@ -22,22 +21,6 @@ router.use(authenticate);
 router.get(
   '/me',
   asyncHandler(userController.getCurrentUser.bind(userController))
-);
-
-router.put(
-  '/me/profile-subjects',
-  [
-    body('subjectIds')
-      .custom((v) => {
-        if (v === null) return true;
-        if (Array.isArray(v) && v.length === 0) return true;
-        if (Array.isArray(v) && v.length === 2) return v.every((id) => typeof id === 'string' && mongoose.isValidObjectId(id));
-        return false;
-      })
-      .withMessage('subjectIds: null, [] (сброс) или [mongoId, mongoId]')
-  ],
-  validate,
-  asyncHandler(userController.putProfileSubjects.bind(userController))
 );
 
 router.patch(
