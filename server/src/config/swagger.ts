@@ -11,7 +11,9 @@ const swaggerSpec = {
 
 **Структура контента:** Subject → Book → Chapter → Topic → Paragraph.
 
-**Базовый путь:** \`${API_BASE_PATH}\``,
+**Базовый путь REST:** \`${API_BASE_PATH}\`
+
+**Socket.IO (Live Kahoot, Solo Kahoot):** не входит в этот JSON REST; подключение клиента к хосту приложения (обычно тот же домен, что и фронт) по пути \`/socket.io/\` (Engine.IO v4). Авторизация — JWT в cookie \`token\` или в \`auth.token\` при connect. Подробно — тег **Socket.IO**.`,
     contact: { name: 'Edu AI', url: 'https://kakoi-to-do-men.ru' }
   },
   servers: [
@@ -25,7 +27,7 @@ const swaggerSpec = {
     {
       name: 'Tests',
       description:
-        'Генерация (auth/guest) с `questionCount`, отправка ответов (`forTrial` для расчёта тем пробника), Solo (daily pack / practice), привязка гостевого теста'
+        'Генерация (auth/guest) с `questionCount`, отправка ответов (`forTrial`), Solo (daily pack / practice, REST + см. события `solo:*` у тега Socket.IO). Live Kahoot: подготовьте тест этим же API (`POST …/tests/generate` и др.), затем в socket `live:create { testId }`. Привязка гостевого теста — `claim-guest`.'
     },
     {
       name: 'Trial',
@@ -40,6 +42,37 @@ const swaggerSpec = {
     {
       name: 'Profile subject pairs',
       description: 'Каталог разрешённых пар профильных предметов (для выбора учеником). CRUD — admin, GET — auth'
+    },
+    {
+      name: 'Socket.IO',
+      description: `Реалтайм не по HTTP из этой спецификации: тот же процесс Node, что REST (порт из \`process.env.PORT\`). Клиент Socket.IO (EIO=4) использует путь \`/socket.io/\` (polling + upgrade на WebSocket при необходимости). **Nginx:** нужен \`location /socket.io/ { proxy_pass … }\` на upstream Node, иначе клиент получит HTML SPA и не подключится.
+
+**Авторизация:** только зарегистрированные пользователи — JWT в HTTP-only cookie \`token\` или \`socket.handshake.auth.token\` (строка \`Bearer …\` поддерживается middleware).
+
+#### Live Kahoot — события client → server (третий аргумент = ack)
+
+| Событие | Payload | Успешный ack | Ошибки |
+|---------|---------|--------------|--------|
+| \`live:create\` | \`LiveKahootSocketCreatePayload\` | \`{ success: true, roomId, pin, state }\` | \`{ success: false, message }\` |
+| \`live:join\` | \`LiveKahootSocketJoinPayload\` | \`{ success: true, roomId, state }\` | \`{ success: false, code: 'NOT_FOUND' \\| 'ALREADY_STARTED', message }\` |
+| \`live:lobby_leave\` | \`{ roomId }\` | \`{ success: true }\` | \`{ success: false, message }\` |
+| \`live:rejoin\` | \`{ roomId }\` | \`{ success: true, state }\` | \`{ success: false, code: 'NOT_FOUND' \\| 'NOT_MEMBER', message }\` |
+| \`live:ready\` | \`{ roomId, ready }\` | \`{ success: true }\` | \`{ success: false, message, debug? }\` |
+| \`live:host_start\` | \`{ roomId }\` | \`{ success: true }\` | текстовые \`message\` (нет прав, уже игра и т.д.) |
+| \`live:submit_answer\` | \`LiveKahootSocketSubmitAnswerPayload\` | \`{ success: true }\` | например уже ответили, время вышло |
+
+#### Live Kahoot — server → client
+
+| Событие | Назначение |
+|---------|-------------|
+| \`live:room_state\` | Персонифицированный снимок комнаты: схема \`LiveKahootRoomStatePayload\` (в том числе \`revision\`, \`pin\`, \`participants\`, \`me\`, активный вопрос в фазе \`playing\`). |
+| \`live:room_closed\` | \`{ reason?: 'host_left' \\| … }\` — закрытие комнаты (напр. выход хоста). |
+
+#### Solo (сессионный режим того же socket)
+
+После создания Solo-сессии по REST можно пользоваться событиями \`solo:join\`, \`solo:answer\`, \`solo:finish\` (см. схемы \`SocketSolo*\` ниже).
+
+Сценарий Live Kahoot как UI: генерация или выбор теста по REST (**POST ${API_BASE_PATH}/tests/generate** и т.д.) → сохранённый **testId** → \`live:create\` с этим id.`
     },
     { name: 'System', description: 'Health check, отладка' }
   ],
@@ -293,6 +326,106 @@ const swaggerSpec = {
         properties: {
           profileSubjectPairId: { nullable: true, type: 'string', description: 'Mongo id пары или null' }
         }
+      },
+      LiveKahootSocketCreatePayload: {
+        type: 'object',
+        required: ['testId'],
+        description: 'Ведущий создаёт комнату после выбора/генерации теста по REST (Mongo id тем же теста)',
+        properties: {
+          testId: { type: 'string', description: 'Mongo id документа Test' }
+        }
+      },
+      LiveKahootSocketJoinPayload: {
+        type: 'object',
+        required: ['pin'],
+        properties: {
+          pin: { type: 'string', description: '6 цифр кода комнаты (сервер нормализует нецифровые символы)' }
+        }
+      },
+      LiveKahootSocketSubmitAnswerPayload: {
+        type: 'object',
+        required: ['roomId', 'questionIndex', 'selectedOption'],
+        properties: {
+          roomId: { type: 'string' },
+          questionIndex: { type: 'integer', minimum: 0 },
+          selectedOption: { type: 'string', description: 'Идентификатор выбранного ответа (строка/буква согласно модели ENT)' }
+        }
+      },
+      LiveKahootRoomStatePayload: {
+        type: 'object',
+        description:
+          'Снимок состояния в `live:room_state` и в ack `state`; поля могут быть `null`/опущены при смене фазы. Сервер санитизирует вопрос (без ответа).',
+        properties: {
+          revision: { type: 'integer' },
+          type: {
+            type: 'string',
+            enum: ['lobby', 'playing', 'finished'],
+            description: 'Фаза лобби / раунды / финал и табло'
+          },
+          roomId: { type: 'string' },
+          pin: { type: 'string' },
+          testId: { type: 'string' },
+          hostId: { type: 'string' },
+          totalQuestions: { type: 'integer' },
+          me: {
+            type: 'object',
+            properties: {
+              userId: { type: 'string' },
+              isHost: { type: 'boolean' },
+              ready: { type: 'boolean' }
+            }
+          },
+          participants: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                userId: { type: 'string' },
+                displayName: { type: 'string' },
+                isHost: { type: 'boolean' },
+                ready: { type: 'boolean' },
+                totalScore: { type: 'number' }
+              }
+            }
+          },
+          canHostStart: { type: 'boolean', description: 'Только у ведущего; остальные false' },
+          currentQuestionIndex: { type: 'integer', nullable: true },
+          questionEndAt: { type: 'number', nullable: true, description: 'Unix ms окончания раунда (фаза playing)' },
+          currentQuestion: { type: 'object', nullable: true, description: 'Санитизированный вопрос для клиента' },
+          hasSubmittedThisRound: { type: 'boolean' },
+          finalLeaderboard: {
+            type: 'array',
+            nullable: true,
+            items: {
+              type: 'object',
+              properties: {
+                rank: { type: 'integer' },
+                userId: { type: 'string' },
+                displayName: { type: 'string' },
+                totalScore: { type: 'number' }
+              }
+            }
+          }
+        }
+      },
+      SocketSoloJoinPayload: {
+        type: 'object',
+        required: ['soloSessionId'],
+        properties: { soloSessionId: { type: 'string', description: 'Mongo id SoloSession' } }
+      },
+      SocketSoloAnswerPayload: {
+        type: 'object',
+        required: ['soloSessionId', 'questionIndex', 'selectedOption'],
+        properties: {
+          soloSessionId: { type: 'string' },
+          questionIndex: { type: 'integer', minimum: 0 },
+          selectedOption: { type: 'string' }
+        }
+      },
+      SocketSoloFinishPayload: {
+        type: 'object',
+        required: ['soloSessionId'],
+        properties: { soloSessionId: { type: 'string' } }
       },
       RebuildCanonicalFromTopicsRequest: {
         type: 'object',
