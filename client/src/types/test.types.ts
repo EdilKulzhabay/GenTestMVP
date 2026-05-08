@@ -56,6 +56,8 @@ export interface GenerateTestRequest {
   testProfile?: TestGenerationProfile;
   /** Пробник ЕНТ: 20, 10, 40… */
   questionCount?: number;
+  /** Пробник: сервер не подменяет тест «последним по предмету», а генерирует под выбранную книгу/главу */
+  forTrial?: boolean;
 }
 
 export interface SubmitAnswer {

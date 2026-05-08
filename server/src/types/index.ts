@@ -259,6 +259,11 @@ export interface IGenerateTestDTO {
   testProfile?: TestGenerationProfile;
   /** Формат ЕНТ: 10, 20, 40… (кратно 10, макс. 120). Пробник задаёт 20/10/10/40/40. */
   questionCount?: number;
+  /**
+   * Пробник: запрашиваем именно тест по выбранной книге/главе (с relatedContent тем),
+   * чтобы submit мог посчитать trialTopicMastery и /trial/apply-results корректно открыл узлы.
+   */
+  forTrial?: boolean;
 }
 
 export interface ISubmitTestDTO {

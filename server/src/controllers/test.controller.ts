@@ -276,10 +276,12 @@ class TestController {
   /** POST /tests/generate-guest */
   async generateTestGuest(req: Request, res: Response): Promise<void> {
     const dto: IGenerateTestDTO = req.body;
-    const cached = await this.findLatestTestBySubject(dto.subjectId);
-    if (cached) {
-      success(res, this.sanitize(cached), 'Test loaded from last saved (same subject)', 201);
-      return;
+    if (!dto.forTrial) {
+      const cached = await this.findLatestTestBySubject(dto.subjectId);
+      if (cached) {
+        success(res, this.sanitize(cached), 'Test loaded from last saved (same subject)', 201);
+        return;
+      }
     }
     const { contentForAI, book } = await resolveBookContentForAI(dto);
     const genOpts =
@@ -315,10 +317,12 @@ class TestController {
     const userId = (req as any).user?.userId;
     await assertLearnerSubjectAccess(userId, dto.subjectId);
     await roadmapService.assertKnowledgeMapTestAllowed(userId, dto.subjectId, dto.roadmapNodeId);
-    const cached = await this.findLatestTestBySubject(dto.subjectId);
-    if (cached) {
-      success(res, this.sanitize(cached), 'Test loaded from last saved (same subject)', 201);
-      return;
+    if (!dto.forTrial) {
+      const cached = await this.findLatestTestBySubject(dto.subjectId);
+      if (cached) {
+        success(res, this.sanitize(cached), 'Test loaded from last saved (same subject)', 201);
+        return;
+      }
     }
     const { contentForAI, book } = await resolveBookContentForAI(dto);
 
