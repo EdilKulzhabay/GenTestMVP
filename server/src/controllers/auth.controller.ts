@@ -174,11 +174,12 @@ class AuthController {
       || process.env.FRONTEND_URL
       || 'http://localhost:5173';
 
-    if (user.role === UserRole.ADMIN) {
-      res.redirect(`${frontendUrl}/admin`);
-    } else {
-      res.redirect(`${frontendUrl}/user`);
-    }
+    // Токен кладём во фрагмент URL (#), а не в query, чтобы он не попадал
+    // в Referer и server-side логи фронта/прокси. Cookie сохраняется как fallback
+    // для браузеров, где cookie ходят (десктоп Chrome и т.п.); на iOS Safari ITP
+    // блокирует third-party cookie, и фронт читает токен из фрагмента.
+    const path = user.role === UserRole.ADMIN ? '/admin' : '/user';
+    res.redirect(`${frontendUrl}${path}#token=${response.token}`);
   }
 
   /** POST /auth/create-admin */

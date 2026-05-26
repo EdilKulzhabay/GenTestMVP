@@ -42,11 +42,13 @@ cd telegram-bot && npm run dev     # Telegram webhook — порт 5113
 В корне проекта есть пример файла `subject.json`. Админ может импортировать предмет целиком (книги, главы, темы, параграфы) двумя способами:
 
 **Через админ-панель:**
+
 1. Войти как admin → Дашборд
 2. Нажать кнопку «Импорт JSON» → выбрать файл
 3. Проверить предпросмотр → «Импортировать предмет»
 
 **Через API:**
+
 ```bash
 curl -X POST http://localhost:5000/api/v1/subjects/import \
   -H "Content-Type: application/json" \
@@ -58,43 +60,44 @@ curl -X POST http://localhost:5000/api/v1/subjects/import \
 
 ### server/.env
 
-| Переменная | Обязательна | По умолчанию | Описание |
-|------------|:-----------:|--------------|----------|
-| `MONGODB_URI` | да | `mongodb://localhost:27017/edu-ai-test-platform` | Строка подключения к MongoDB |
-| `JWT_SECRET` | да | dev-значение | Секрет для JWT |
-| `PORT` | нет | `5000` | Порт API |
-| `NODE_ENV` | нет | `development` | Окружение |
-| `CORS_ORIGIN` | нет | `http://localhost:5173` | Разрешённые origins (через запятую) |
-| `OPENAI_API_KEY` | нет | — | Ключ OpenAI (без него — mock-тесты) |
-| `SMTP_HOST` | нет | — | SMTP хост для верификации email |
-| `SMTP_PORT` | нет | `587` | SMTP порт |
-| `SMTP_SECURE` | нет | `false` | `true` для порта 465 (SSL), `false` для STARTTLS |
-| `SMTP_USER` | нет | — | SMTP логин |
-| `SMTP_PASS` | нет | — | SMTP пароль |
-| `SMTP_FROM` | нет | — | Адрес отправителя |
-| `GOOGLE_CLIENT_ID` | нет | — | Google OAuth Client ID |
-| `GOOGLE_CLIENT_SECRET` | нет | — | Google OAuth Client Secret |
-| `GOOGLE_CALLBACK_URL` | нет | — | Callback URL для Google (например `https://your-domain.com/api/v1/auth/google/callback`) |
-| `FRONTEND_URL` | нет | — | URL фронтенда для редиректа после Google OAuth |
-| `TELEGRAM_BOT_TOKEN` | нет | — | Токен Telegram-бота |
-| `TELEGRAM_BOT_USERNAME` | нет | — | Username бота (для ссылки t.me/bot?start=...) |
-| `WHATSAPP_BOT_URL` | нет | — | URL whatsapp-bot (http://localhost:5112) |
+| Переменная              | Обязательна | По умолчанию                                     | Описание                                                                                                                                                                                                                  |
+| ----------------------- | :---------: | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MONGODB_URI`           |     да      | `mongodb://localhost:27017/edu-ai-test-platform` | Строка подключения к MongoDB                                                                                                                                                                                              |
+| `JWT_SECRET`            |     да      | dev-значение                                     | Секрет для JWT                                                                                                                                                                                                            |
+| `PORT`                  |     нет     | `5000`                                           | Порт API                                                                                                                                                                                                                  |
+| `NODE_ENV`              |     нет     | `development`                                    | Окружение                                                                                                                                                                                                                 |
+| `CORS_ORIGIN`           |     нет     | `http://localhost:5173`                          | Разрешённые origins (через запятую)                                                                                                                                                                                       |
+| `OPENAI_API_KEY`        |     нет     | —                                                | Ключ OpenAI (без него — mock-тесты)                                                                                                                                                                                       |
+| `SMTP_HOST`             |     нет     | —                                                | SMTP хост для верификации email                                                                                                                                                                                           |
+| `SMTP_PORT`             |     нет     | `587`                                            | SMTP порт                                                                                                                                                                                                                 |
+| `SMTP_SECURE`           |     нет     | `false`                                          | `true` для порта 465 (SSL), `false` для STARTTLS                                                                                                                                                                          |
+| `SMTP_USER`             |     нет     | —                                                | SMTP логин                                                                                                                                                                                                                |
+| `SMTP_PASS`             |     нет     | —                                                | SMTP пароль                                                                                                                                                                                                               |
+| `SMTP_FROM`             |     нет     | —                                                | Адрес отправителя                                                                                                                                                                                                         |
+| `GOOGLE_CLIENT_ID`      |     нет     | —                                                | Google OAuth Client ID                                                                                                                                                                                                    |
+| `GOOGLE_CLIENT_SECRET`  |     нет     | —                                                | Google OAuth Client Secret                                                                                                                                                                                                |
+| `GOOGLE_CALLBACK_URL`   |     нет     | —                                                | Callback URL для Google (например `https://your-domain.com/api/v1/auth/google/callback`)                                                                                                                                  |
+| `FRONTEND_URL`          |     нет     | —                                                | URL фронтенда для редиректа после Google OAuth                                                                                                                                                                            |
+| `OAUTH_ALLOWED_ORIGINS` |     нет     | —                                                | Доп. allowlist origin-ов для OAuth-редиректа, через запятую. Поддерживает точные origin-ы (`https://app.example.com`) и wildcard-поддомены (`*.onrender.com` — только https, корневой домен не матчится). `FRONTEND_URL` и так в allowlist. В non-production также разрешены `localhost`/`127.0.0.1` и приватные LAN-сети. |
+| `TELEGRAM_BOT_TOKEN`    |     нет     | —                                                | Токен Telegram-бота                                                                                                                                                                                                       |
+| `TELEGRAM_BOT_USERNAME` |     нет     | —                                                | Username бота (для ссылки t.me/bot?start=...)                                                                                                                                                                             |
+| `WHATSAPP_BOT_URL`      |     нет     | —                                                | URL whatsapp-bot (http://localhost:5112)                                                                                                                                                                                  |
 
 ### client/.env
 
-| Переменная | По умолчанию | Описание |
-|------------|--------------|----------|
+| Переменная     | По умолчанию                   | Описание    |
+| -------------- | ------------------------------ | ----------- |
 | `VITE_API_URL` | `http://localhost:5000/api/v1` | URL бэкенда |
 
 ## Стек технологий
 
-| Слой | Технологии |
-|------|-----------|
+| Слой         | Технологии                                                                      |
+| ------------ | ------------------------------------------------------------------------------- |
 | **Frontend** | React 18, TypeScript, Vite, Tailwind CSS, React Router 6, React Hook Form + Zod |
-| **Backend** | Node.js, Express, TypeScript, Mongoose (MongoDB) |
-| **Auth** | JWT в httpOnly cookie, OTP через WhatsApp/Telegram, Google OAuth |
-| **AI** | OpenAI API (mock при отсутствии ключа) |
-| **Docs** | Swagger UI (`/api-docs`) |
+| **Backend**  | Node.js, Express, TypeScript, Mongoose (MongoDB)                                |
+| **Auth**     | JWT в httpOnly cookie, OTP через WhatsApp/Telegram, Google OAuth                |
+| **AI**       | OpenAI API (mock при отсутствии ключа)                                          |
+| **Docs**     | Swagger UI (`/api-docs`)                                                        |
 
 ## Структура проекта
 
@@ -141,14 +144,17 @@ GenTestMVP/
 ## Роли и потоки
 
 ### Гость
+
 `/welcome` → `/guest/subjects` → выбор книги → генерация теста → прохождение → тизер результата → вход/регистрация → **гостевой тест автоматически сохраняется в историю** → полный результат
 
 ### Студент (user)
+
 Вход → `/user` (дашборд + «Продолжить обучение») → карта знаний (`/user/roadmap`) → выбор доступного узла → генерация теста → тест → результат + AI-разбор → обновление прогресса → рекомендация следующего шага
 
 Также доступен свободный тест: выбор предмета → книга/глава → генерация → тест → результат
 
 ### Администратор (admin)
+
 Вход → `/admin` → импорт предмета из JSON / ручное создание → добавление/редактирование/удаление книг, глав, тем, параграфов → создание canonical roadmap (вручную или через ИИ)
 
 ## Первоначальная настройка для клиента
@@ -162,31 +168,35 @@ GenTestMVP/
 ## Скрипты
 
 ### Server
-| Команда | Описание |
-|---------|----------|
-| `npm run dev` | Запуск в dev-режиме (nodemon + ts-node) |
-| `npm run build` | Компиляция TypeScript |
-| `npm start` | Запуск из dist/ |
+
+| Команда         | Описание                                |
+| --------------- | --------------------------------------- |
+| `npm run dev`   | Запуск в dev-режиме (nodemon + ts-node) |
+| `npm run build` | Компиляция TypeScript                   |
+| `npm start`     | Запуск из dist/                         |
 
 ### WhatsApp Bot (whatsapp-bot/)
-| Команда | Описание |
-|---------|----------|
-| `npm run dev` | Запуск (порт 5112), API: POST /send { phone, text } |
-| `npm run build` | Компиляция |
-| `npm start` | Запуск из dist/ |
+
+| Команда         | Описание                                            |
+| --------------- | --------------------------------------------------- |
+| `npm run dev`   | Запуск (порт 5112), API: POST /send { phone, text } |
+| `npm run build` | Компиляция                                          |
+| `npm start`     | Запуск из dist/                                     |
 
 ### Telegram Bot (telegram-bot/)
-| Команда | Описание |
-|---------|----------|
-| `npm run dev` | Webhook-сервер (порт 5113) |
-| `npm run dev:poll` | Long Polling (для localhost без ngrok) |
+
+| Команда                    | Описание                                           |
+| -------------------------- | -------------------------------------------------- |
+| `npm run dev`              | Webhook-сервер (порт 5113)                         |
+| `npm run dev:poll`         | Long Polling (для localhost без ngrok)             |
 | `npm run webhook -- <URL>` | Установить webhook (напр. https://your-domain.com) |
 
 ### Client
-| Команда | Описание |
-|---------|----------|
-| `npm run dev` | Dev-сервер Vite |
-| `npm run build` | Сборка для production |
+
+| Команда           | Описание                       |
+| ----------------- | ------------------------------ |
+| `npm run dev`     | Dev-сервер Vite                |
+| `npm run build`   | Сборка для production          |
 | `npm run preview` | Предпросмотр production-сборки |
 
 ## Лицензия
