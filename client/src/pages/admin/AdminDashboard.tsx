@@ -6,6 +6,7 @@ import { Loader } from '../../components/ui/Loader';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
 import { SuccessMessage } from '../../components/ui/SuccessMessage';
 import { Button } from '../../components/ui/Button';
+import { ConfirmDeleteBtn } from '../../components/ui/ConfirmDeleteBtn';
 import { getApiErrorMessage } from '../../utils/error';
 
 export const AdminDashboard: React.FC = () => {
@@ -233,6 +234,19 @@ export const AdminDashboard: React.FC = () => {
                   >
                     Карта знаний
                   </Link>
+                  <span className="inline-flex items-center rounded-lg border border-red-100 bg-red-50/50 px-2 py-1">
+                    <ConfirmDeleteBtn
+                      label="Удалить"
+                      onConfirm={async () => {
+                        try {
+                          await subjectApi.deleteSubject(subject._id);
+                          await loadSubjects();
+                        } catch (err) {
+                          setError(getApiErrorMessage(err));
+                        }
+                      }}
+                    />
+                  </span>
                 </div>
               </div>
             );
