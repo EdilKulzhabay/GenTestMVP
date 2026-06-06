@@ -2,13 +2,16 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { subjectApi } from '../../api/subject.api';
 import { roadmapApi } from '../../api/roadmap.api';
+import { ktpApi } from '../../api/ktp.api';
 import { Subject, Book, Chapter, Topic } from '../../types/subject.types';
+import { KtpTopic } from '../../types/ktp.types';
 import { Loader } from '../../components/ui/Loader';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
 import { SuccessMessage } from '../../components/ui/SuccessMessage';
 import { Button } from '../../components/ui/Button';
 import { ConfirmDeleteBtn } from '../../components/ui/ConfirmDeleteBtn';
 import { getApiErrorMessage } from '../../utils/error';
+import { useAuth } from '../../store/auth.store';
 
 /* ───── inline-edit hook ───── */
 
@@ -170,7 +173,7 @@ const RebuildRoadmapButton: React.FC<{
     return (
       <div className="flex flex-col gap-2">
         <span className="inline-flex flex-wrap items-center gap-2 text-sm text-slate-700">
-          <span>Пересобрать карту по главам учебника?</span>
+          <span>Пересобрать карту знаний из КТП?</span>
           <Button type="button" className="text-xs" disabled={loading} onClick={() => void run()}>
             {loading ? '…' : 'Да, пересобрать'}
           </Button>
@@ -203,7 +206,10 @@ const RebuildRoadmapButton: React.FC<{
 export const SubjectDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const { subjectId } = useParams<{ subjectId: string }>();
+  const { user } = useAuth();
+  const isAdminUser = user?.role === 'admin';
   const [subject, setSubject] = useState<Subject | null>(null);
+  const [ktpTopics, setKtpTopics] = useState<KtpTopic[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -215,8 +221,12 @@ export const SubjectDetailPage: React.FC = () => {
     if (!subjectId) return;
     setError(null);
     try {
-      const data = await subjectApi.getSubjectById(subjectId);
+      const [data, ktp] = await Promise.all([
+        subjectApi.getSubjectById(subjectId),
+        ktpApi.getCatalog(subjectId).catch(() => null)
+      ]);
       setSubject(data);
+      setKtpTopics(ktp ? [...ktp.topics].sort((a, b) => a.order - b.order) : []);
     } catch (err) {
       setError(getApiErrorMessage(err));
     }
@@ -355,6 +365,7 @@ export const SubjectDetailPage: React.FC = () => {
             key={book._id}
             book={book}
             subjectId={sid}
+            ktpTopics={ktpTopics}
             expanded={expanded}
             toggle={toggle}
             reload={reload}
@@ -369,14 +380,18 @@ export const SubjectDetailPage: React.FC = () => {
           <Link to={`/admin/roadmaps/${sid}`}>
             <Button variant="outline">Карта знаний</Button>
           </Link>
-          <Link to="/admin/roadmaps/create">
-            <Button variant="outline">Создать / обновить roadmap</Button>
-          </Link>
+          {isAdminUser && (
+            <Link to={`/admin/ktp/${sid}`}>
+              <Button variant="outline">Справочник КТП</Button>
+            </Link>
+          )}
           <RebuildRoadmapButton subjectId={sid} onDone={reload} flash={flash} />
         </div>
         <p className="text-xs text-slate-500">
-          «Актуализировать» удаляет сохранённую запись карты в БД и строит её заново по текущим темам (в главах) и
-          контенту учебника.
+          Карта знаний строится из КТП: узел = тема КТП, которая агрегирует темы книг (разных классов), замапленные на
+          неё. «Актуализировать» пересобирает карту из текущего КТП и маппинга.
+          {ktpTopics.length === 0 &&
+            ' Сначала заполните справочник КТП и привяжите темы книг к темам КТП ниже.'}
         </p>
       </div>
     </div>
@@ -388,11 +403,12 @@ export const SubjectDetailPage: React.FC = () => {
 const BookSection: React.FC<{
   book: Book;
   subjectId: string;
+  ktpTopics: KtpTopic[];
   expanded: Record<string, boolean>;
   toggle: (k: string) => void;
   reload: () => Promise<void>;
   flash: (m: string) => void;
-}> = ({ book, subjectId, expanded, toggle, reload, flash }) => {
+}> = ({ book, subjectId, ktpTopics, expanded, toggle, reload, flash }) => {
   const bk = `book-${book._id}`;
   const isOpen = expanded[bk] ?? false;
 
@@ -439,6 +455,7 @@ const BookSection: React.FC<{
                 chapter={ch}
                 subjectId={subjectId}
                 bookId={book._id}
+                ktpTopics={ktpTopics}
                 expanded={expanded}
                 toggle={toggle}
                 reload={reload}
@@ -469,11 +486,12 @@ const ChapterSection: React.FC<{
   chapter: Chapter;
   subjectId: string;
   bookId: string;
+  ktpTopics: KtpTopic[];
   expanded: Record<string, boolean>;
   toggle: (k: string) => void;
   reload: () => Promise<void>;
   flash: (m: string) => void;
-}> = ({ chapter, subjectId, bookId, expanded, toggle, reload, flash }) => {
+}> = ({ chapter, subjectId, bookId, ktpTopics, expanded, toggle, reload, flash }) => {
   const ck = `ch-${chapter._id}`;
   const isOpen = expanded[ck] ?? false;
 
@@ -517,6 +535,7 @@ const ChapterSection: React.FC<{
               subjectId={subjectId}
               bookId={bookId}
               chapterId={chapter._id}
+              ktpTopics={ktpTopics}
               expanded={expanded}
               toggle={toggle}
               reload={reload}
@@ -540,16 +559,108 @@ const ChapterSection: React.FC<{
 
 /* ───── Topic ───── */
 
+const TopicKtpEditor: React.FC<{
+  topic: Topic;
+  subjectId: string;
+  bookId: string;
+  chapterId: string;
+  ktpTopics: KtpTopic[];
+  reload: () => Promise<void>;
+  flash: (m: string) => void;
+}> = ({ topic, subjectId, bookId, chapterId, ktpTopics, reload, flash }) => {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [sel, setSel] = useState<string[]>(topic.ktpTopicIds ?? []);
+
+  useEffect(() => setSel(topic.ktpTopicIds ?? []), [topic.ktpTopicIds]);
+
+  const mapped = (topic.ktpTopicIds ?? [])
+    .map((id) => ktpTopics.find((k) => k._id === id))
+    .filter((k): k is KtpTopic => Boolean(k));
+
+  const toggleId = (id: string) =>
+    setSel((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await subjectApi.setTopicKtp(subjectId, bookId, chapterId, topic._id, sel);
+      await reload();
+      flash('Маппинг темы на КТП сохранён');
+      setOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+      <span className="text-slate-400">КТП:</span>
+      {mapped.length === 0 && <span className="text-amber-600">не привязано</span>}
+      {mapped.map((k) => (
+        <span key={k._id} className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-800">
+          {k.title}
+        </span>
+      ))}
+      {ktpTopics.length === 0 ? (
+        <span className="italic text-slate-400">— заполните справочник КТП</span>
+      ) : (
+        <button onClick={() => setOpen((o) => !o)} className="text-blue-600 hover:underline">
+          {open ? 'Скрыть' : 'Изменить'}
+        </button>
+      )}
+
+      {open && (
+        <div className="mt-1 w-full space-y-2 rounded-lg border border-slate-200 bg-white p-2">
+          <div className="max-h-48 space-y-1 overflow-auto">
+            {ktpTopics.map((k) => (
+              <label key={k._id} className="flex items-center gap-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={sel.includes(k._id)}
+                  onChange={() => toggleId(k._id)}
+                  className="rounded border-slate-300"
+                />
+                {k.code && <span className="text-slate-400">{k.code}</span>}
+                <span>{k.title}</span>
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => void save()}
+              disabled={saving}
+              className="text-xs font-medium text-blue-600 hover:underline"
+            >
+              {saving ? '…' : 'Сохранить'}
+            </button>
+            <button
+              onClick={() => {
+                setSel(topic.ktpTopicIds ?? []);
+                setOpen(false);
+              }}
+              className="text-xs text-slate-400 hover:underline"
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const TopicSection: React.FC<{
   topic: Topic;
   subjectId: string;
   bookId: string;
   chapterId: string;
+  ktpTopics: KtpTopic[];
   expanded: Record<string, boolean>;
   toggle: (k: string) => void;
   reload: () => Promise<void>;
   flash: (m: string) => void;
-}> = ({ topic, subjectId, bookId, chapterId, expanded, toggle, reload, flash }) => {
+}> = ({ topic, subjectId, bookId, chapterId, ktpTopics, expanded, toggle, reload, flash }) => {
   const tk = `topic-${topic._id}`;
   const isOpen = expanded[tk] ?? false;
 
@@ -581,6 +692,18 @@ const TopicSection: React.FC<{
             }}
           />
         </div>
+      </div>
+
+      <div className="border-t border-slate-50 px-3 py-1.5">
+        <TopicKtpEditor
+          topic={topic}
+          subjectId={subjectId}
+          bookId={bookId}
+          chapterId={chapterId}
+          ktpTopics={ktpTopics}
+          reload={reload}
+          flash={flash}
+        />
       </div>
 
       {isOpen && (

@@ -42,22 +42,12 @@ export const trialApi = {
     return data.data;
   },
 
-  /** Слияние сохранённых гостевых результатов после входа (темы ≥ 80%, либо устар. только баллы по блоку) */
+  /**
+   * Слияние сохранённых гостевых результатов после входа: применяем накопленные узлы КТП (темы ≥ 80%).
+   * Источник mastery — topicMasteryRows (узлы `ktp:*`); устаревший формат-массив больше не несёт nodeId.
+   */
   async mergePendingIfAny(pending: PendingTrialMergePayload | TrialResultRow[]): Promise<void> {
-    if (Array.isArray(pending)) {
-      if (!pending.length) return;
-      await this.applyResults(
-        pending.map((r) => ({ subjectId: r.subjectId, nodeId: r.nodeId, scorePercent: r.scorePercent }))
-      );
-      return;
-    }
-    const rows: TrialTopicMasteryRow[] = pending.topicMasteryRows?.length
-      ? pending.topicMasteryRows
-      : pending.results.map((r) => ({
-          subjectId: r.subjectId,
-          nodeId: r.nodeId,
-          scorePercent: r.scorePercent
-        }));
+    const rows: TrialTopicMasteryRow[] = Array.isArray(pending) ? [] : pending.topicMasteryRows ?? [];
     if (!rows.length) return;
     await this.applyResults(rows);
   }

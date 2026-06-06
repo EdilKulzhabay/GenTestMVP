@@ -35,19 +35,29 @@ export const roadmapApi = {
     return data.data.subjects;
   },
 
-  async getNodeLesson(nodeId: string, subjectId: string): Promise<RoadmapLessonResponse> {
+  async getNodeLesson(
+    nodeId: string,
+    subjectId: string,
+    lessonId?: string
+  ): Promise<RoadmapLessonResponse> {
     const { data } = await axiosInstance.get<ApiResponse<RoadmapLessonResponse>>(
       `/roadmaps/nodes/${encodeURIComponent(nodeId)}/lesson`,
-      { params: { subjectId } }
+      { params: { subjectId, ...(lessonId ? { lessonId } : {}) } }
     );
     return data.data;
   },
 
-  async postNodeLessonRead(nodeId: string, subjectId: string): Promise<{ readCompletedAt: string }> {
-    const { data } = await axiosInstance.post<ApiResponse<{ readCompletedAt: string }>>(
-      `/roadmaps/nodes/${encodeURIComponent(nodeId)}/lesson/read`,
-      { subjectId }
-    );
+  async postNodeLessonRead(
+    nodeId: string,
+    subjectId: string,
+    lessonId?: string
+  ): Promise<{ readCompletedAt: string; lessonId: string; allCompleted: boolean; nextLessonId: string | null }> {
+    const { data } = await axiosInstance.post<
+      ApiResponse<{ readCompletedAt: string; lessonId: string; allCompleted: boolean; nextLessonId: string | null }>
+    >(`/roadmaps/nodes/${encodeURIComponent(nodeId)}/lesson/read`, {
+      subjectId,
+      ...(lessonId ? { lessonId } : {})
+    });
     return data.data;
   },
 

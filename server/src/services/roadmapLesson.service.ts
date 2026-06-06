@@ -2,14 +2,16 @@ import fs from 'fs/promises';
 import path from 'path';
 import mongoose from 'mongoose';
 import { CanonicalRoadmap } from '../models/CanonicalRoadmap.model';
+import { KtpCatalog } from '../models/KtpCatalog.model';
 import { RoadmapChatAttachment } from '../models/RoadmapChatAttachment.model';
 import { Subject } from '../models';
-import { buildTopicCanonicalNodes } from '../utils/roadmapChapter.util';
 import {
   ICanonicalRoadmapNode,
-  IRoadmapLessonResponse,
-  IRoadmapLessonVideo
+  ICanonicalNodeLesson,
+  IRoadmapLessonListItem,
+  IRoadmapLessonResponse
 } from '../types/roadmap.types';
+import { resolveNodeLessons, nodeLessonIds, describeNodeSources } from './nodeLessonContent.service';
 import { roadmapAIService } from './roadmap.ai.service';
 import { roadmapService } from './roadmap.service';
 import { AppError } from '../utils';
@@ -29,77 +31,46 @@ function normalizeLessonContent(raw: string, format: 'markdown' | 'html'): strin
   return format === 'html' ? stripHtmlToText(raw) : raw;
 }
 
-function parseVideo(meta: Record<string, unknown>): IRoadmapLessonVideo | null {
-  const v = meta.video;
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
-  const o = v as Record<string, unknown>;
-  const url = typeof o.url === 'string' ? o.url.trim() : '';
-  if (!url) return null;
-  const durationSec =
-    typeof o.durationSec === 'number' && Number.isFinite(o.durationSec) ? o.durationSec : undefined;
-  const posterUrl =
-    typeof o.posterUrl === 'string' && o.posterUrl.trim() ? o.posterUrl.trim() : undefined;
-  return { url, ...(durationSec !== undefined ? { durationSec } : {}), ...(posterUrl ? { posterUrl } : {}) };
+/** Завершён ли узел live-сборкой из КТП (тогда нет сохранённого документа для кэша summary). */
+async function isLiveBuiltFromKtp(subjectId: string): Promise<boolean> {
+  const ktp = await KtpCatalog.findOne({ subjectId }).select('topics').lean();
+  return !!ktp && Array.isArray(ktp.topics) && ktp.topics.length > 0;
 }
 
-function lessonMetaFromNode(node: ICanonicalRoadmapNode): {
-  lessonId: string;
-  rawContent: string;
-  contentStorageFormat: 'markdown' | 'html';
-  summary?: string;
-  video: IRoadmapLessonVideo | null;
-} {
-  const md = node.metadata;
-  const lessonRaw =
-    md && typeof md === 'object' && md !== null && 'lesson' in md ? (md as { lesson?: unknown }).lesson : undefined;
+/** Сохранить summary урока в сохранённый документ карты (только для не-live карт). */
+async function persistLessonSummary(
+  subjectId: string,
+  nodeId: string,
+  lessonId: string,
+  summary: string
+): Promise<void> {
+  if (await isLiveBuiltFromKtp(subjectId)) return;
 
-  if (lessonRaw && typeof lessonRaw === 'object' && lessonRaw !== null && !Array.isArray(lessonRaw)) {
-    const L = lessonRaw as Record<string, unknown>;
-    const lessonId =
-      typeof L.lessonId === 'string' && L.lessonId.trim() ? L.lessonId.trim() : node.nodeId;
-    const summary = typeof L.summary === 'string' ? L.summary : undefined;
-    const rawContent =
-      typeof L.content === 'string'
-        ? L.content
-        : node.description?.trim() ?? '';
-    const contentStorageFormat = L.contentFormat === 'html' ? 'html' : 'markdown';
-    const video = parseVideo(L);
-    return { lessonId, rawContent, contentStorageFormat, summary, video };
-  }
-
-  return {
-    lessonId: node.nodeId,
-    rawContent: node.description?.trim() ?? '',
-    contentStorageFormat: 'markdown',
-    summary: undefined,
-    video: null
-  };
-}
-
-async function persistLessonSummary(subjectId: string, nodeId: string, summary: string): Promise<void> {
-  const sub = await Subject.findById(subjectId).lean();
-  if (sub && buildTopicCanonicalNodes(sub).length > 0) {
-    return;
-  }
   const subjectOid = new mongoose.Types.ObjectId(subjectId);
   const doc = await CanonicalRoadmap.findOne({ subjectId: subjectOid }).sort({ version: -1 });
   if (!doc) return;
 
   const updatedNodes = doc.nodes.map((n) => {
     if (n.nodeId !== nodeId) return n;
-    const oldMeta =
+    const meta =
       n.metadata && typeof n.metadata === 'object' && n.metadata !== null
         ? { ...(n.metadata as Record<string, unknown>) }
         : {};
-    const oldLesson =
-      oldMeta.lesson &&
-      typeof oldMeta.lesson === 'object' &&
-      oldMeta.lesson !== null &&
-      !Array.isArray(oldMeta.lesson)
-        ? { ...(oldMeta.lesson as Record<string, unknown>) }
-        : {};
-    oldMeta.lesson = { ...oldLesson, summary };
-    return { ...n, metadata: oldMeta };
+
+    // metadata.lessons[] — обновляем урок по lessonId
+    if (Array.isArray(meta.lessons)) {
+      meta.lessons = (meta.lessons as Array<Record<string, unknown>>).map((l) =>
+        l && l.lessonId === lessonId ? { ...l, summary } : l
+      );
+    }
+    // single metadata.lesson — обратная совместимость
+    if (meta.lesson && typeof meta.lesson === 'object' && !Array.isArray(meta.lesson)) {
+      const oldLesson = meta.lesson as Record<string, unknown>;
+      if (!oldLesson.lessonId || oldLesson.lessonId === lessonId) {
+        meta.lesson = { ...oldLesson, summary };
+      }
+    }
+    return { ...n, metadata: meta };
   });
 
   doc.set('nodes', updatedNodes);
@@ -107,61 +78,127 @@ async function persistLessonSummary(subjectId: string, nodeId: string, summary: 
   await doc.save();
 }
 
+function lessonListItems(
+  lessons: ICanonicalNodeLesson[],
+  completedSet: Set<string>
+): IRoadmapLessonListItem[] {
+  let prevCompleted = true;
+  return lessons.map((l, i) => {
+    const completed = completedSet.has(l.lessonId);
+    const locked = i > 0 && !prevCompleted;
+    prevCompleted = completed;
+    return { lessonId: l.lessonId, title: l.title, order: l.order, completed, locked };
+  });
+}
+
 class RoadmapLessonService {
+  private async resolveNode(subjectId: string, nodeId: string): Promise<ICanonicalRoadmapNode> {
+    const bundle = await roadmapService.resolveCanonical(subjectId);
+    const node = bundle.nodes.find((n) => n.nodeId === nodeId);
+    if (!node) throw AppError.notFound('Roadmap node not found for this subject');
+    return node;
+  }
+
   async getLesson(
     userId: string,
     subjectId: string,
-    nodeId: string
+    nodeId: string,
+    lessonId?: string
   ): Promise<IRoadmapLessonResponse> {
     if (!mongoose.isValidObjectId(subjectId)) throw AppError.badRequest('Invalid subjectId');
 
     const subject = await Subject.findById(subjectId).lean();
     if (!subject) throw AppError.notFound('Subject not found');
 
-    const canonical = await roadmapService.getCanonical(subjectId);
-    const node = canonical.nodes.find((n) => n.nodeId === nodeId);
-    if (!node) throw AppError.notFound('Roadmap node not found for this subject');
+    const node = await this.resolveNode(subjectId, nodeId);
+    const lessons = await resolveNodeLessons(subjectId, subject, node);
+    if (lessons.length === 0) throw AppError.notFound('Lesson not found for this node');
 
-    const meta = lessonMetaFromNode(node as ICanonicalRoadmapNode);
-    const contentNormalized = normalizeLessonContent(meta.rawContent, meta.contentStorageFormat);
+    const progress = await roadmapService.getNodeProgress(userId, subjectId, nodeId);
+    const readAtByLesson = new Map<string, Date | undefined>(
+      (progress?.lessons ?? []).map((l) => [l.lessonId, l.readAt])
+    );
+    const completedSet = new Set([...readAtByLesson.keys()]);
+    const listItems = lessonListItems(lessons, completedSet);
 
-    const readCompletedAt = await roadmapService.getLessonReadAtIso(userId, subjectId, nodeId);
+    // Целевой урок: явный lessonId → он; иначе первый незавершённый; иначе первый.
+    let targetIdx = lessonId ? lessons.findIndex((l) => l.lessonId === lessonId) : -1;
+    if (targetIdx < 0 && !lessonId) {
+      targetIdx = lessons.findIndex((l) => !completedSet.has(l.lessonId));
+    }
+    if (targetIdx < 0) targetIdx = 0;
+    const target = lessons[targetIdx];
 
-    let summary = meta.summary?.trim() ?? '';
+    const contentNormalized = normalizeLessonContent(target.content, target.contentFormat);
+
+    let summary = target.summary?.trim() ?? '';
     if (!summary && contentNormalized.trim() && process.env.OPENAI_API_KEY) {
       summary = await roadmapAIService.generateLessonSummary({
         subjectTitle: subject.title,
-        nodeTitle: node.title,
+        nodeTitle: target.title || node.title,
         lessonText: contentNormalized
       });
       if (summary) {
-        await persistLessonSummary(subjectId, nodeId, summary).catch((e) =>
+        await persistLessonSummary(subjectId, nodeId, target.lessonId, summary).catch((e) =>
           console.warn('[roadmapLesson] persist summary failed', e)
         );
       }
     }
 
+    const readAt = readAtByLesson.get(target.lessonId);
+
     return {
       nodeId: node.nodeId,
-      lessonId: meta.lessonId,
-      title: node.title,
+      lessonId: target.lessonId,
+      title: target.title || node.title,
       summary,
       content: contentNormalized,
       contentFormat: 'markdown',
       textFormat: 'markdown',
-      video: meta.video,
-      readCompletedAt
+      video: target.video ?? null,
+      readCompletedAt: readAt ? readAt.toISOString() : null,
+      lessons: listItems,
+      lessonsTotal: lessons.length,
+      lessonIndex: targetIdx,
+      nextLessonId: targetIdx < lessons.length - 1 ? lessons[targetIdx + 1].lessonId : null,
+      prevLessonId: targetIdx > 0 ? lessons[targetIdx - 1].lessonId : null,
+      locked: listItems[targetIdx]?.locked ?? false,
+      sources: describeNodeSources(subject, node)
     };
   }
 
-  async markLessonRead(userId: string, subjectId: string, nodeId: string): Promise<{ readCompletedAt: string }> {
-    return roadmapService.markLessonRead(userId, subjectId, nodeId);
+  /**
+   * Отметить урок прочитанным. Если lessonId не задан — завершаем первый незавершённый урок узла.
+   * Последовательный гейтинг: нельзя завершить урок, пока не завершены предыдущие.
+   */
+  async markLessonRead(
+    userId: string,
+    subjectId: string,
+    nodeId: string,
+    lessonId?: string
+  ): Promise<{ readCompletedAt: string; lessonId: string; allCompleted: boolean; nextLessonId: string | null }> {
+    if (!mongoose.isValidObjectId(subjectId)) throw AppError.badRequest('Invalid subjectId');
+
+    const node = await this.resolveNode(subjectId, nodeId);
+    const lessonIds = await nodeLessonIds(subjectId, node);
+    if (lessonIds.length === 0) throw AppError.notFound('Lesson not found for this node');
+
+    let targetId = lessonId?.trim();
+    if (!targetId) {
+      const progress = await roadmapService.getNodeProgress(userId, subjectId, nodeId);
+      const completed = new Set((progress?.lessons ?? []).map((l) => l.lessonId));
+      targetId = lessonIds.find((id) => !completed.has(id)) ?? lessonIds[lessonIds.length - 1];
+    }
+
+    // Валидация lessonId и последовательный гейтинг — в markLessonComplete.
+    return roadmapService.markLessonComplete(userId, subjectId, nodeId, targetId);
   }
 
   async postChatMessage(input: {
     userId: string;
     subjectId: string;
     nodeId: string;
+    lessonId?: string;
     text: string;
     attachmentIds?: string[];
   }): Promise<{ reply: string }> {
@@ -173,12 +210,11 @@ class RoadmapLessonService {
     const subject = await Subject.findById(subjectId).lean();
     if (!subject) throw AppError.notFound('Subject not found');
 
-    const canonical = await roadmapService.getCanonical(subjectId);
-    const node = canonical.nodes.find((n) => n.nodeId === nodeId);
-    if (!node) throw AppError.notFound('Roadmap node not found for this subject');
-
-    const meta = lessonMetaFromNode(node as ICanonicalRoadmapNode);
-    const lessonText = normalizeLessonContent(meta.rawContent, meta.contentStorageFormat);
+    const node = await this.resolveNode(subjectId, nodeId);
+    const lessons = await resolveNodeLessons(subjectId, subject, node);
+    const lesson =
+      (input.lessonId && lessons.find((l) => l.lessonId === input.lessonId)) || lessons[0];
+    const lessonText = lesson ? normalizeLessonContent(lesson.content, lesson.contentFormat) : '';
 
     const images: Array<{ mimeType: string; base64: string }> = [];
     const ids = (input.attachmentIds ?? []).filter(Boolean);
@@ -203,7 +239,7 @@ class RoadmapLessonService {
 
     const reply = await roadmapAIService.chatLessonNode({
       subjectTitle: subject.title,
-      nodeTitle: node.title,
+      nodeTitle: lesson?.title || node.title,
       nodeDescription: node.description?.trim(),
       lessonText,
       userMessage: trimmed,
@@ -223,8 +259,8 @@ class RoadmapLessonService {
     originalName: string;
     sizeBytes: number;
   }): Promise<{ attachmentId: string }> {
-    const canonical = await roadmapService.getCanonical(input.subjectId);
-    if (!canonical.nodes.some((n) => n.nodeId === input.nodeId)) {
+    const bundle = await roadmapService.resolveCanonical(input.subjectId);
+    if (!bundle.nodes.some((n) => n.nodeId === input.nodeId)) {
       await fs.unlink(input.absolutePath).catch(() => undefined);
       throw AppError.notFound('Roadmap node not found for this subject');
     }

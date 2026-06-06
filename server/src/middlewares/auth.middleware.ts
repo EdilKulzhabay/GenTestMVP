@@ -156,6 +156,11 @@ export const authorize = (...roles: UserRole[]) => {
 export const isAdmin = authorize(UserRole.ADMIN);
 
 /**
+ * Учитель или админ: декомпозиция книг и маппинг тем на КТП.
+ */
+export const isTeacherOrAdmin = authorize(UserRole.TEACHER, UserRole.ADMIN);
+
+/**
  * Middleware для проверки, является ли пользователь обычным пользователем или админом
  */
 export const isUser = authorize(UserRole.USER, UserRole.ADMIN);

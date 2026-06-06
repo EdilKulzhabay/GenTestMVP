@@ -21,6 +21,8 @@ export interface Paragraph {
 export interface Topic {
   _id: string;
   title: string;
+  /** Темы КТП, на которые замаплена эта тема книги (M:N) */
+  ktpTopicIds?: string[];
   paragraphs: Paragraph[];
 }
 

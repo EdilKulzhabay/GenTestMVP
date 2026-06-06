@@ -234,6 +234,12 @@ export const AdminDashboard: React.FC = () => {
                   >
                     Карта знаний
                   </Link>
+                  <Link
+                    to={`/admin/ktp/${subject._id}`}
+                    className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100"
+                  >
+                    КТП
+                  </Link>
                   <span className="inline-flex items-center rounded-lg border border-red-100 bg-red-50/50 px-2 py-1">
                     <ConfirmDeleteBtn
                       label="Удалить"

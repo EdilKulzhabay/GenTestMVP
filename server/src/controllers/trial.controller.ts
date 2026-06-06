@@ -32,7 +32,7 @@ class TrialController {
         throw AppError.badRequest('Each result needs subjectId, nodeId, scorePercent');
       }
     }
-    const out = await roadmapService.applyTrialChapterResults(userId, results);
+    const out = await roadmapService.applyTrialKtpResults(userId, results);
     success(res, out, 'Trial results applied to roadmap');
   }
 }

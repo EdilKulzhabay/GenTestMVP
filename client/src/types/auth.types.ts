@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'user';
+export type UserRole = 'admin' | 'teacher' | 'user';
 
 /** Пара профильных предметов (из GET /auth/me при populate) */
 export interface ProfileSubjectPairBrief {

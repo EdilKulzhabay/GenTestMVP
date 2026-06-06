@@ -254,20 +254,17 @@ class TestController {
     };
   }
 
-  /** Темы ≥ порога (пробник) — для apply-results по персональному роадмапу */
-  private trialTopicMasteryPayload(
+  /** Узлы КТП ≥ порога (пробник) — для apply-results по персональному роадмапу (фанаут темы книги → КТП) */
+  private async trialTopicMasteryPayload(
     forTrial: boolean,
     test: { subjectId: unknown; bookId: unknown; questions: IQuestion[] },
     userAnswers: IUserAnswer[]
-  ): { trialTopicMastery: Array<{ subjectId: string; nodeId: string; scorePercent: number }> } | undefined {
+  ): Promise<{ trialTopicMastery: Array<{ subjectId: string; nodeId: string; scorePercent: number }> } | undefined> {
     if (!forTrial) return undefined;
+    const subject = await Subject.findById(String(test.subjectId)).lean();
+    if (!subject) return { trialTopicMastery: [] };
     return {
-      trialTopicMastery: computeTrialTopicMasteryRows(
-        String(test.subjectId),
-        String(test.bookId),
-        test,
-        userAnswers
-      )
+      trialTopicMastery: computeTrialTopicMasteryRows(subject, String(test.bookId), test, userAnswers)
     };
   }
 
@@ -307,7 +304,7 @@ class TestController {
 
     const { userAnswers, result: resultSummary } = this.checkAnswers(test, answers);
     const detailed = await this.buildDetailedResult(test, userAnswers, resultSummary);
-    const trialExtra = this.trialTopicMasteryPayload(Boolean(forTrial), test, userAnswers);
+    const trialExtra = await this.trialTopicMasteryPayload(Boolean(forTrial), test, userAnswers);
     success(res, { ...detailed, ...trialExtra }, 'Test submitted successfully');
   }
 
@@ -355,7 +352,7 @@ class TestController {
 
     const { userAnswers, result: resultSummary } = this.checkAnswers(test, answers);
     const detailed = await this.buildDetailedResult(test, userAnswers, resultSummary);
-    const trialExtra = this.trialTopicMasteryPayload(Boolean(forTrial), test, userAnswers);
+    const trialExtra = await this.trialTopicMasteryPayload(Boolean(forTrial), test, userAnswers);
 
     const questionHashes = test.questions.map((q) => Buffer.from(q.questionText).toString('base64'));
     const testHistory: ITestHistory = {
@@ -672,7 +669,7 @@ class TestController {
 
     const { userAnswers, result: resultSummary } = this.checkAnswers(test, answers);
     const detailed = await this.buildDetailedResult(test, userAnswers, resultSummary);
-    const trialExtra = this.trialTopicMasteryPayload(Boolean(forTrial), test, userAnswers);
+    const trialExtra = await this.trialTopicMasteryPayload(Boolean(forTrial), test, userAnswers);
 
     const questionHashes = test.questions.map((q) => Buffer.from(q.questionText).toString('base64'));
     const testHistory: ITestHistory = {

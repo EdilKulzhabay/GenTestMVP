@@ -4,6 +4,8 @@ import { Types } from 'mongoose';
 
 export enum UserRole {
   USER = 'user',
+  /** Учитель: декомпозиция книг + маппинг на КТП. Эталон КТП и управление — за ADMIN. */
+  TEACHER = 'teacher',
   ADMIN = 'admin'
 }
 
@@ -36,6 +38,8 @@ export interface IParagraph {
 export interface ITopic {
   _id?: Types.ObjectId;
   title: string;
+  /** Темы КТП (KtpCatalog.topics._id), на которые замаплена эта тема книги. M:N. */
+  ktpTopicIds?: Types.ObjectId[];
   paragraphs: IParagraph[];
 }
 
