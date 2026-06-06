@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { body, param, query } from 'express-validator';
 import { subjectController } from '../controllers';
-import { authenticate, isAdmin, asyncHandler, validate } from '../middlewares';
+import { authenticate, isAdmin, isTeacherOrAdmin, asyncHandler, validate } from '../middlewares';
 
 /**
  * SUBJECT ROUTES
@@ -92,7 +92,7 @@ router.post(
  */
 router.post(
   '/:id/books',
-  isAdmin,
+  isTeacherOrAdmin,
   [
     param('id')
       .isMongoId()
@@ -123,7 +123,7 @@ router.post(
  */
 router.post(
   '/books/:bookId/chapters',
-  isAdmin,
+  isTeacherOrAdmin,
   [
     param('bookId')
       .isMongoId()
@@ -150,7 +150,7 @@ router.post(
  */
 router.post(
   '/chapters/:chapterId/topics',
-  isAdmin,
+  isTeacherOrAdmin,
   [
     param('chapterId')
       .isMongoId()
@@ -177,7 +177,7 @@ router.post(
  */
 router.post(
   '/topics/:topicId/paragraphs',
-  isAdmin,
+  isTeacherOrAdmin,
   [
     param('topicId')
       .isMongoId()
@@ -224,7 +224,7 @@ router.patch(
 
 router.patch(
   '/:subjectId/books/:bookId',
-  isAdmin,
+  isTeacherOrAdmin,
   [param('subjectId').isMongoId(), param('bookId').isMongoId()],
   validate,
   asyncHandler(subjectController.updateBook.bind(subjectController))
@@ -232,7 +232,7 @@ router.patch(
 
 router.patch(
   '/:subjectId/books/:bookId/chapters/:chapterId',
-  isAdmin,
+  isTeacherOrAdmin,
   [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId()],
   validate,
   asyncHandler(subjectController.updateChapter.bind(subjectController))
@@ -240,10 +240,30 @@ router.patch(
 
 router.patch(
   '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId',
-  isAdmin,
+  isTeacherOrAdmin,
   [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), param('topicId').isMongoId()],
   validate,
   asyncHandler(subjectController.updateTopic.bind(subjectController))
+);
+
+/**
+ * @route   PUT /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/ktp
+ * @desc    Маппинг темы книги на темы КТП (M:N)
+ * @access  Admin (в Фазе 5 — teacher+admin)
+ */
+router.put(
+  '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/ktp',
+  isTeacherOrAdmin,
+  [
+    param('subjectId').isMongoId(),
+    param('bookId').isMongoId(),
+    param('chapterId').isMongoId(),
+    param('topicId').isMongoId(),
+    body('ktpTopicIds').optional().isArray().withMessage('ktpTopicIds must be an array'),
+    body('ktpTopicIds.*').optional().isMongoId().withMessage('ktpTopicIds must contain valid ids')
+  ],
+  validate,
+  asyncHandler(subjectController.setTopicKtp.bind(subjectController))
 );
 
 // ========== DELETE ==========
@@ -258,7 +278,7 @@ router.delete(
 
 router.delete(
   '/:subjectId/books/:bookId',
-  isAdmin,
+  isTeacherOrAdmin,
   [param('subjectId').isMongoId(), param('bookId').isMongoId()],
   validate,
   asyncHandler(subjectController.deleteBook.bind(subjectController))
@@ -266,7 +286,7 @@ router.delete(
 
 router.delete(
   '/:subjectId/books/:bookId/chapters/:chapterId',
-  isAdmin,
+  isTeacherOrAdmin,
   [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId()],
   validate,
   asyncHandler(subjectController.deleteChapter.bind(subjectController))
@@ -274,7 +294,7 @@ router.delete(
 
 router.delete(
   '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId',
-  isAdmin,
+  isTeacherOrAdmin,
   [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), param('topicId').isMongoId()],
   validate,
   asyncHandler(subjectController.deleteTopic.bind(subjectController))
@@ -282,7 +302,7 @@ router.delete(
 
 router.delete(
   '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/paragraphs/:paragraphId',
-  isAdmin,
+  isTeacherOrAdmin,
   [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), param('topicId').isMongoId(), param('paragraphId').isMongoId()],
   validate,
   asyncHandler(subjectController.deleteParagraph.bind(subjectController))

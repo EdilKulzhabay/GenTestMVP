@@ -4,6 +4,7 @@ import { roadmapController } from '../controllers/roadmap.controller';
 import {
   authenticate,
   isAdmin,
+  isTeacherOrAdmin,
   asyncHandler,
   validate,
   roadmapChatUpload,
@@ -47,7 +48,8 @@ router.get(
   '/nodes/:nodeId/lesson',
   [
     param('nodeId').trim().notEmpty(),
-    query('subjectId').isMongoId().withMessage('Invalid subjectId')
+    query('subjectId').isMongoId().withMessage('Invalid subjectId'),
+    query('lessonId').optional().isString().trim().notEmpty()
   ],
   validate,
   asyncHandler(roadmapController.getNodeLesson.bind(roadmapController))
@@ -57,7 +59,8 @@ router.post(
   '/nodes/:nodeId/lesson/read',
   [
     param('nodeId').trim().notEmpty(),
-    body('subjectId').isMongoId().withMessage('Invalid subjectId')
+    body('subjectId').isMongoId().withMessage('Invalid subjectId'),
+    body('lessonId').optional().isString().trim().notEmpty()
   ],
   validate,
   asyncHandler(roadmapController.postNodeLessonRead.bind(roadmapController))
@@ -79,6 +82,7 @@ router.post(
     param('nodeId').trim().notEmpty(),
     body('subjectId').isMongoId(),
     body('text').trim().notEmpty(),
+    body('lessonId').optional().isString().trim().notEmpty(),
     body('attachmentIds').optional().isArray(),
     body('attachmentIds.*').optional().isMongoId()
   ],
@@ -112,12 +116,13 @@ router.post(
   asyncHandler(roadmapController.postTestSubmitted.bind(roadmapController))
 );
 
+// Пересборка карты знаний из КТП. Оба пути ведут на один обработчик (старый — алиас для клиента).
 router.post(
-  '/admin/rebuild-from-topics',
-  isAdmin,
+  ['/admin/rebuild-from-ktp', '/admin/rebuild-from-topics'],
+  isTeacherOrAdmin,
   [body('subjectId').isMongoId().withMessage('Invalid subjectId')],
   validate,
-  asyncHandler(roadmapController.rebuildFromTopicsAdmin.bind(roadmapController))
+  asyncHandler(roadmapController.rebuildFromKtpAdmin.bind(roadmapController))
 );
 
 router.post(

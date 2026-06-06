@@ -8,6 +8,7 @@ export {
   optionalAuthenticate,
   authorize,
   isAdmin,
+  isTeacherOrAdmin,
   isUser
 } from './auth.middleware';
 

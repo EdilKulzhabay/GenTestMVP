@@ -133,13 +133,13 @@ class RoadmapController {
   /**
    * Админ: создать/обновить canonical roadmap вручную (JSON).
    */
-  async rebuildFromTopicsAdmin(req: Request, res: Response): Promise<void> {
+  async rebuildFromKtpAdmin(req: Request, res: Response): Promise<void> {
     const subjectId = (req.body as { subjectId?: string })?.subjectId;
     if (!subjectId || !mongoose.isValidObjectId(subjectId)) {
       throw AppError.badRequest('subjectId is required');
     }
-    const data = await roadmapService.adminRebuildCanonicalFromTopics(subjectId);
-    success(res, data, 'Карта знаний пересобрана из тем');
+    const data = await roadmapService.rebuildCanonicalFromKtp(subjectId);
+    success(res, data, 'Карта знаний пересобрана из КТП');
   }
 
   async upsertCanonicalAdmin(req: Request, res: Response): Promise<void> {
@@ -203,19 +203,25 @@ class RoadmapController {
     const userId = (req as Request & { user?: { userId: string } }).user?.userId as string;
     const nodeId = req.params.nodeId as string;
     const subjectId = req.query.subjectId as string;
+    const lessonId = typeof req.query.lessonId === 'string' ? req.query.lessonId.trim() : undefined;
     if (!subjectId?.trim()) throw AppError.badRequest('subjectId is required');
     await assertLearnerSubjectAccess(userId, subjectId.trim());
-    const data = await roadmapLessonService.getLesson(userId, subjectId.trim(), nodeId);
+    const data = await roadmapLessonService.getLesson(userId, subjectId.trim(), nodeId, lessonId || undefined);
     success(res, data, 'Lesson');
   }
 
   async postNodeLessonRead(req: Request, res: Response): Promise<void> {
     const userId = (req as Request & { user?: { userId: string } }).user?.userId as string;
     const nodeId = req.params.nodeId as string;
-    const subjectId = (req.body as { subjectId?: string })?.subjectId;
+    const { subjectId, lessonId } = req.body as { subjectId?: string; lessonId?: string };
     if (!subjectId?.trim()) throw AppError.badRequest('subjectId is required');
     await assertLearnerSubjectAccess(userId, subjectId.trim());
-    const data = await roadmapLessonService.markLessonRead(userId, subjectId.trim(), nodeId);
+    const data = await roadmapLessonService.markLessonRead(
+      userId,
+      subjectId.trim(),
+      nodeId,
+      typeof lessonId === 'string' && lessonId.trim() ? lessonId.trim() : undefined
+    );
     success(res, data, 'Lesson marked read');
   }
 
@@ -236,10 +242,11 @@ class RoadmapController {
   async postNodeChatMessage(req: Request, res: Response): Promise<void> {
     const userId = (req as Request & { user?: { userId: string } }).user?.userId as string;
     const nodeId = req.params.nodeId as string;
-    const { subjectId, text, attachmentIds } = req.body as {
+    const { subjectId, text, attachmentIds, lessonId } = req.body as {
       subjectId?: string;
       text?: string;
       attachmentIds?: string[];
+      lessonId?: string;
     };
     if (!subjectId?.trim()) throw AppError.badRequest('subjectId is required');
     await assertLearnerSubjectAccess(userId, subjectId.trim());
@@ -247,6 +254,7 @@ class RoadmapController {
       userId,
       subjectId: subjectId.trim(),
       nodeId,
+      ...(typeof lessonId === 'string' && lessonId.trim() ? { lessonId: lessonId.trim() } : {}),
       text: text ?? '',
       attachmentIds
     });

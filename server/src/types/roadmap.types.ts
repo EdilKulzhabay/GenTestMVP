@@ -3,6 +3,30 @@ import { Types } from 'mongoose';
 export type RoadmapAvailability = 'locked' | 'available';
 export type RoadmapProgressStatus = 'not_started' | 'in_progress' | 'mastered';
 
+/** Тема КТП (встроенная в KtpCatalog). _id — стабильный id для маппинга и nodeId роудмапа. */
+export interface IKtpTopic {
+  _id?: Types.ObjectId;
+  title: string;
+  description?: string;
+  order: number;
+  /** Код темы от центра тестирования (отображение/импорт, НЕ стабильный id) */
+  code?: string;
+  /** Явные пререквизиты (задел; по умолчанию линейный порядок по order) */
+  prerequisiteKtpTopicIds?: Types.ObjectId[];
+}
+
+/** Справочник КТП по предмету: канонический упорядоченный список тем. */
+export interface IKtpCatalog {
+  _id?: Types.ObjectId;
+  subjectId: Types.ObjectId;
+  /** Год актуальности справочника ЦТ (меняется ежегодно) */
+  year?: number;
+  version: number;
+  topics: IKtpTopic[];
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
 export interface ICanonicalRoadmapNode {
   nodeId: string;
   title: string;
@@ -10,6 +34,26 @@ export interface ICanonicalRoadmapNode {
   description?: string;
   prerequisites: string[];
   metadata?: Record<string, unknown>;
+}
+
+/** Источник контента узла КТП: тема книги (книга/глава/тема). */
+export interface ICanonicalNodeSource {
+  bookId: string;
+  chapterId: string;
+  topicId: string;
+  title?: string;
+}
+
+/** Урок внутри узла КТП (metadata.lessons[]). Один урок = одна замапленная тема книги. */
+export interface ICanonicalNodeLesson {
+  lessonId: string;
+  title: string;
+  order: number;
+  content: string;
+  contentFormat: 'markdown' | 'html';
+  summary?: string;
+  video?: IRoadmapLessonVideo | null;
+  source?: ICanonicalNodeSource;
 }
 
 /** Откуда сгенерирована статичная карта (книга/глава) — для UI и трассировки */
@@ -34,6 +78,12 @@ export interface ICanonicalRoadmap {
   updatedAt?: Date;
 }
 
+/** Прогресс по отдельному уроку внутри узла (для последовательного гейтинга) */
+export interface IUserLessonProgress {
+  lessonId: string;
+  readAt?: Date;
+}
+
 /** Прогресс по узлу в БД (для расчёта освоения и «урок прочитан») */
 export interface IUserRoadmapNodeProgress {
   nodeId: string;
@@ -43,7 +93,9 @@ export interface IUserRoadmapNodeProgress {
   bestScore: number;
   /** Сколько раз подряд сдали тест по узлу карты < ROADMAP_KNOWLEDGE_TEST_PASS_PERCENT; сбрасывается при успехе или «Освоил» */
   lowScoreFailCount?: number;
-  /** Отметка «урок прочитан» (страница теории по узлу) */
+  /** Прогресс по урокам узла (узел = тема КТП, внутри упорядоченные уроки) */
+  lessons?: IUserLessonProgress[];
+  /** Отметка «материал узла пройден» — ставится при завершении ПОСЛЕДНЕГО урока */
   lessonReadAt?: Date;
 }
 
@@ -67,6 +119,16 @@ export interface IRoadmapLessonMeta {
   video?: IRoadmapLessonVideo | null;
 }
 
+/** Элемент списка уроков узла (для степпера с последовательным гейтингом) */
+export interface IRoadmapLessonListItem {
+  lessonId: string;
+  title: string;
+  order: number;
+  completed: boolean;
+  /** Заблокирован: предыдущий по порядку урок не завершён */
+  locked: boolean;
+}
+
 /** Ответ GET …/lesson — один текстовый формат на всё API (summary + content) */
 export interface IRoadmapLessonResponse {
   nodeId: string;
@@ -80,6 +142,15 @@ export interface IRoadmapLessonResponse {
   textFormat?: 'markdown' | 'html';
   video: IRoadmapLessonVideo | null;
   readCompletedAt: string | null;
+  /** Уроки узла (тема КТП может содержать несколько уроков из разных книг/классов) */
+  lessons: IRoadmapLessonListItem[];
+  lessonsTotal: number;
+  /** Позиция текущего урока (0-based) */
+  lessonIndex: number;
+  nextLessonId: string | null;
+  prevLessonId: string | null;
+  /** Текущий урок заблокирован (предыдущий не завершён) */
+  locked: boolean;
 }
 
 /** Элемент списка предметов для bottom sheet (согласован с GET /roadmaps/personal) */

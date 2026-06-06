@@ -4,6 +4,7 @@ import subjectRoutes from './subject.routes';
 import testRoutes from './test.routes';
 import userRoutes from './user.routes';
 import roadmapRoutes from './roadmap.routes';
+import ktpRoutes from './ktp.routes';
 import trialRoutes from './trial.routes';
 import profileSubjectPairRoutes from './profileSubjectPair.routes';
 import { ROUTES } from '../config/constants';
@@ -22,6 +23,7 @@ router.use(ROUTES.SUBJECTS, subjectRoutes);
 router.use(ROUTES.TESTS, testRoutes);
 router.use(ROUTES.USERS, userRoutes);
 router.use(ROUTES.ROADMAPS, roadmapRoutes);
+router.use(ROUTES.KTP, ktpRoutes);
 router.use(ROUTES.TRIAL, trialRoutes);
 router.use(ROUTES.PROFILE_SUBJECT_PAIRS, profileSubjectPairRoutes);
 

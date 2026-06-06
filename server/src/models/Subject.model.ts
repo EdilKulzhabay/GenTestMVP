@@ -62,13 +62,15 @@ const ParagraphSchema = new Schema<IParagraph>({
 }, { timestamps: false });
 
 const TopicSchema = new Schema<ITopic>({
-  title: { 
-    type: String, 
+  title: {
+    type: String,
     required: true,
     trim: true,
     minlength: 1,
     maxlength: 200
   },
+  /** Темы КТП (KtpCatalog.topics._id), на которые замаплена эта тема книги. M:N. */
+  ktpTopicIds: [{ type: Schema.Types.ObjectId }],
   paragraphs: [ParagraphSchema]
 }, { timestamps: false });
 

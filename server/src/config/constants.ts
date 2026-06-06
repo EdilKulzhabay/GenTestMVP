@@ -13,6 +13,7 @@ export const ROUTES = {
   TESTS: '/tests',
   USERS: '/users',
   ROADMAPS: '/roadmaps',
+  KTP: '/ktp',
   TRIAL: '/trial',
   PROFILE_SUBJECT_PAIRS: '/profile-subject-pairs',
   HEALTH: '/health',

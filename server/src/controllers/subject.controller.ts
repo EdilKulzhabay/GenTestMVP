@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { Subject } from '../models';
+import { KtpCatalog } from '../models/KtpCatalog.model';
 import {
   ICreateSubjectDTO,
   IAddBookDTO,
@@ -292,6 +293,36 @@ class SubjectController {
     if (title !== undefined) topic.title = title.trim();
     await subject.save();
     success(res, subject, 'Topic updated');
+  }
+
+  /**
+   * PUT /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/ktp
+   * Маппинг темы книги на темы КТП (M:N). Тело: { ktpTopicIds: string[] }.
+   */
+  async setTopicKtp(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    if (!chapter) throw AppError.notFound('Chapter not found');
+    const topic = chapter.topics.find((t) => t._id?.toString() === req.params.topicId);
+    if (!topic) throw AppError.notFound('Topic not found');
+
+    const { ktpTopicIds } = req.body as { ktpTopicIds?: string[] };
+    const ids = Array.isArray(ktpTopicIds) ? [...new Set(ktpTopicIds.map((x) => String(x)))] : [];
+
+    if (ids.length > 0) {
+      const ktp = await KtpCatalog.findOne({ subjectId: subject._id }).lean();
+      const known = new Set((ktp?.topics ?? []).map((t) => String(t._id)));
+      const unknown = ids.filter((id) => !known.has(id));
+      if (unknown.length > 0) {
+        throw AppError.badRequest(`Темы КТП не найдены в справочнике: ${unknown.join(', ')}`);
+      }
+    }
+
+    topic.ktpTopicIds = ids.map((id) => new mongoose.Types.ObjectId(id));
+    await subject.save();
+    success(res, subject, 'Маппинг темы на КТП сохранён');
   }
 
   async deleteTopic(req: Request, res: Response): Promise<void> {

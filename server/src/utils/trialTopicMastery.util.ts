@@ -1,17 +1,20 @@
 import { IQuestion, IUserAnswer } from '../types';
-import { topicNodeId } from './roadmapChapter.util';
+import { mapBookTopicToKtpNodeIds } from './roadmapKtp.util';
 import { ROADMAP_TRIAL_MASTERY_THRESHOLD_PERCENT } from '../roadmap/roadmap.rules';
 
 type TopicKey = string;
 
 /**
- * Результаты пробника: по темам, где в этом тесте ≥ порога (по умолчанию 80%) правильных.
- * Считает только вопросы с relatedContent.topicId и chapterId (нужен nodeId = book:chapter:topic).
+ * Результаты пробника: узлы КТП, где в этом тесте ≥ порога (по умолчанию 80%) правильных.
+ *
+ * Считает корректность по (chapterId, topicId) из relatedContent, затем ФАНАУТИТ каждую
+ * тему книги на все КТП-узлы (`ktp:*`), на которые она замаплена (Subject.Topic.ktpTopicIds).
+ * Один узел КТП может получить вклад от нескольких тем книг — берём максимальный score.
  */
 export function computeTrialTopicMasteryRows(
-  subjectId: string,
+  subject: unknown,
   bookId: string,
-  test: { questions: IQuestion[] },
+  test: { subjectId?: unknown; questions: IQuestion[] },
   userAnswers: IUserAnswer[]
 ): Array<{ subjectId: string; nodeId: string; scorePercent: number }> {
   if (test.questions.length !== userAnswers.length) return [];
@@ -31,17 +34,24 @@ export function computeTrialTopicMasteryRows(
     byTopic.set(key, acc);
   }
 
-  const bookIdStr = String(bookId);
-  const out: Array<{ subjectId: string; nodeId: string; scorePercent: number }> = [];
+  const sid = (subject as { _id?: unknown })._id;
+  const subjectId = sid ? String(sid) : String(test.subjectId ?? '');
+
+  // Фанаут темы книги → КТП-узлы; дедуп по максимальному score на узел.
+  const bestByNode = new Map<string, number>();
   for (const v of byTopic.values()) {
     if (v.total < 1) continue;
     const scorePercent = Math.round((v.correct / v.total) * 100);
     if (scorePercent < ROADMAP_TRIAL_MASTERY_THRESHOLD_PERCENT) continue;
-    out.push({
-      subjectId: String(subjectId),
-      nodeId: topicNodeId(bookIdStr, v.chapterId, v.topicId),
-      scorePercent
-    });
+    for (const nodeId of mapBookTopicToKtpNodeIds(subject, bookId, v.chapterId, v.topicId)) {
+      const prev = bestByNode.get(nodeId) ?? 0;
+      if (scorePercent > prev) bestByNode.set(nodeId, scorePercent);
+    }
+  }
+
+  const out: Array<{ subjectId: string; nodeId: string; scorePercent: number }> = [];
+  for (const [nodeId, scorePercent] of bestByNode) {
+    out.push({ subjectId, nodeId, scorePercent });
   }
   return out;
 }

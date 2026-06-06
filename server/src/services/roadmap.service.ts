@@ -1,17 +1,17 @@
-import fs from 'fs/promises';
 import mongoose from 'mongoose';
 import { CanonicalRoadmap } from '../models/CanonicalRoadmap.model';
+import { KtpCatalog } from '../models/KtpCatalog.model';
 import { UserRoadmapProgress, normalizeStoredNodeProgress } from '../models/UserRoadmapProgress.model';
 import { RoadmapAttempt } from '../models/RoadmapAttempt.model';
 import { Subject, User, Test } from '../models';
 import { roadmapAIService } from './roadmap.ai.service';
-import { parseCanonicalNodesFromPayload } from '../utils/roadmapJson';
-import { firstExistingCanonicalRoadmapFile } from '../utils/canonicalRoadmapPaths';
 import { assertValidCanonicalNodes } from '../utils/roadmapGraph';
-import { buildTopicCanonicalNodes } from '../utils/roadmapChapter.util';
+import { buildKtpCanonicalNodes } from '../utils/roadmapKtp.util';
+import { getNodeLessonIds } from '../utils/nodeLessons.util';
 import {
   ICanonicalRoadmapNode,
   ICanonicalRoadmapSourceMeta,
+  IKtpCatalog,
   IPersonalRoadmapNodeView,
   IUserRoadmapNodeProgress,
   INextRecommended,
@@ -107,64 +107,29 @@ function compareFrontier(
 }
 
 class RoadmapService {
-  private async trySeedCanonicalFromStaticFile(subjectId: string): Promise<void> {
-    const exists = await CanonicalRoadmap.findOne({ subjectId }).sort({ version: -1 }).lean();
-    if (exists) return;
-
-    const filePath = firstExistingCanonicalRoadmapFile(subjectId);
-    if (!filePath) return;
-
-    const text = await fs.readFile(filePath, 'utf8');
-    const parsed: unknown = JSON.parse(text);
-    const { nodes, version, description } = parseCanonicalNodesFromPayload(parsed);
-    assertValidCanonicalNodes(nodes);
-
-    const subjectObjectId = new mongoose.Types.ObjectId(subjectId);
-    const ver = typeof version === 'number' ? version : 1;
-
-    try {
-      await CanonicalRoadmap.findOneAndUpdate(
-        { subjectId: subjectObjectId },
-        {
-          $set: {
-            subjectId: subjectObjectId,
-            version: ver,
-            nodes,
-            ...(description ? { description } : {})
-          },
-          $unset: { sourceMeta: 1 }
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
-    } catch (err: unknown) {
-      const code = (err as { code?: number })?.code;
-      if (code !== 11000) throw err;
-    }
-  }
-
   /**
-   * Приоритет: узлы по темам учебника (авто). Иначе — Mongo canonical или JSON-файл.
+   * Приоритет: live-сборка из КТП (КТП-справочник + маппинг тем книг).
+   * Иначе — сохранённый в Mongo canonical (ручной JSON через upsertCanonicalAdmin).
    */
   async resolveCanonical(subjectId: string): Promise<CanonicalBundle> {
     if (!mongoose.isValidObjectId(subjectId)) throw AppError.badRequest('Invalid subjectId');
     const subject = await Subject.findById(subjectId).lean();
     if (!subject) throw AppError.notFound('Subject not found');
 
-    const topicNodes = buildTopicCanonicalNodes(subject);
-    if (topicNodes.length > 0) {
-      const updatedAt = (subject as { updatedAt?: Date }).updatedAt;
-      const version = Math.max(
-        1,
-        Math.floor((updatedAt ? new Date(updatedAt).getTime() : Date.now()) / 1000)
-      );
-      return { version, nodes: topicNodes, fromChapters: true };
+    const ktp = await KtpCatalog.findOne({ subjectId }).lean<IKtpCatalog>();
+    if (ktp && Array.isArray(ktp.topics) && ktp.topics.length > 0) {
+      const ktpNodes = buildKtpCanonicalNodes(subject, ktp);
+      if (ktpNodes.length > 0) {
+        const sUpd = (subject as { updatedAt?: Date }).updatedAt
+          ? new Date((subject as { updatedAt?: Date }).updatedAt as Date).getTime()
+          : 0;
+        const kUpd = ktp.updatedAt ? new Date(ktp.updatedAt).getTime() : 0;
+        const version = Math.max(1, Math.floor(Math.max(sUpd, kUpd) / 1000));
+        return { version, nodes: ktpNodes, fromChapters: true };
+      }
     }
 
-    let doc = await CanonicalRoadmap.findOne({ subjectId }).sort({ version: -1 }).lean();
-    if (!doc) {
-      await this.trySeedCanonicalFromStaticFile(subjectId);
-      doc = await CanonicalRoadmap.findOne({ subjectId }).sort({ version: -1 }).lean();
-    }
+    const doc = await CanonicalRoadmap.findOne({ subjectId }).sort({ version: -1 }).lean();
     if (!doc) {
       throw AppError.notFound('Canonical roadmap not configured for this subject');
     }
@@ -634,9 +599,10 @@ class RoadmapService {
   }
 
   /**
-   * Пробное тестирование: отметить освоение узлов (тема = nodeId book:chapter:topic) при балле ≥ порога пробника.
+   * Пробное тестирование: отметить освоение узлов КТП (nodeId = `ktp:*`) при балле ≥ порога пробника.
+   * Строки приходят из фанаута тем книг на КТП-узлы (computeTrialTopicMasteryRows).
    */
-  async applyTrialChapterResults(
+  async applyTrialKtpResults(
     userId: string,
     results: Array<{ subjectId: string; nodeId: string; scorePercent: number }>
   ): Promise<{ updatedNodeIds: string[] }> {
@@ -815,6 +781,79 @@ class RoadmapService {
     return { readCompletedAt: readAt.toISOString() };
   }
 
+  /** Прогресс по узлу (нормализованный) — для расчёта состояния уроков. */
+  async getNodeProgress(
+    userId: string,
+    subjectId: string,
+    nodeId: string
+  ): Promise<IUserRoadmapNodeProgress | null> {
+    if (!mongoose.isValidObjectId(subjectId)) throw AppError.badRequest('Invalid subjectId');
+    const raw = await UserRoadmapProgress.findOne({ userId, subjectId }).lean();
+    if (!raw) return null;
+    const found = (raw.nodes ?? []).find(
+      (n) => (n as { nodeId?: string }).nodeId === nodeId
+    );
+    return found ? normalizeStoredNodeProgress(found) : null;
+  }
+
+  /**
+   * Отметить урок узла завершённым (последовательный гейтинг внутри узла).
+   * Завершение ПОСЛЕДНЕГО урока ставит node.lessonReadAt («материал узла пройден»).
+   */
+  async markLessonComplete(
+    userId: string,
+    subjectId: string,
+    nodeId: string,
+    lessonId: string
+  ): Promise<{ lessonId: string; readCompletedAt: string; allCompleted: boolean; nextLessonId: string | null }> {
+    if (!mongoose.isValidObjectId(subjectId)) throw AppError.badRequest('Invalid subjectId');
+    if (!nodeId?.trim()) throw AppError.badRequest('nodeId is required');
+    if (!lessonId?.trim()) throw AppError.badRequest('lessonId is required');
+
+    const bundle = await this.resolveCanonical(subjectId);
+    const node = bundle.nodes.find((n) => n.nodeId === nodeId);
+    if (!node) throw AppError.badRequest('Unknown nodeId for this subject');
+    const lessonIds = getNodeLessonIds(node);
+    if (!lessonIds.includes(lessonId)) throw AppError.badRequest('Unknown lessonId for this node');
+
+    const canonicalNodes = bundle.nodes;
+    const raw = await UserRoadmapProgress.findOne({ userId, subjectId }).lean();
+    const merged = this.mergeProgressWithCanonical(canonicalNodes, raw?.nodes ?? []);
+    const map = progressMap(merged);
+    const cur = map.get(nodeId) ?? defaultProgress(nodeId);
+
+    const now = new Date();
+    const lessons = [...(cur.lessons ?? [])];
+    if (!lessons.some((l) => l.lessonId === lessonId)) {
+      lessons.push({ lessonId, readAt: now });
+    }
+    const completed = new Set(lessons.map((l) => l.lessonId));
+    const allCompleted = lessonIds.every((id) => completed.has(id));
+    const updated: IUserRoadmapNodeProgress = {
+      ...cur,
+      nodeId,
+      lessons,
+      ...(allCompleted ? { lessonReadAt: now } : {})
+    };
+
+    const finalNodes = merged.filter((n) => n.nodeId !== nodeId);
+    finalNodes.push(updated);
+    const orderedNodes = this.mergeProgressWithCanonical(canonicalNodes, finalNodes);
+
+    await UserRoadmapProgress.findOneAndUpdate(
+      { userId, subjectId },
+      {
+        $set: { canonicalVersion: bundle.version, nodes: orderedNodes },
+        $setOnInsert: { userId, subjectId }
+      },
+      { upsert: true, new: true }
+    );
+
+    const idx = lessonIds.indexOf(lessonId);
+    const nextLessonId = idx >= 0 && idx < lessonIds.length - 1 ? lessonIds[idx + 1] : null;
+    return { lessonId, readCompletedAt: now.toISOString(), allCompleted, nextLessonId };
+  }
+
   /** Сброс счётчика неудачных попыток теста по узлу (кнопка «Освоил» на странице материала) */
   async acknowledgeMaterialMastery(
     userId: string,
@@ -855,24 +894,13 @@ class RoadmapService {
     return { lowScoreFailCount: 0, knowledgeMapTestBlocked: false };
   }
 
-  async getLessonReadAtIso(userId: string, subjectId: string, nodeId: string): Promise<string | null> {
-    if (!mongoose.isValidObjectId(subjectId)) throw AppError.badRequest('Invalid subjectId');
-    const bundle = await this.resolveCanonical(subjectId);
-    if (!bundle.nodes.some((n) => n.nodeId === nodeId)) {
-      throw AppError.notFound('Roadmap node not found for this subject');
-    }
-
-    const rawProgress = await UserRoadmapProgress.findOne({ userId, subjectId }).lean();
-    const merged = this.mergeProgressWithCanonical(bundle.nodes, rawProgress?.nodes ?? []);
-    const p = progressMap(merged).get(nodeId);
-    return p?.lessonReadAt?.toISOString() ?? null;
-  }
-
   /**
-   * Админ: сбросить сохранённую canonical-карту в БД и записать заново из актуальных тем (внутри глав) предмета.
-   * Обновляет `updatedAt` предмета — версия карты для учеников пересчитывается при следующем запросе.
+   * Админ: пересобрать (актуализировать) карту знаний из КТП.
+   * Проверяет, что КТП заведён и хотя бы одна тема книги замаплена; удаляет устаревший
+   * сохранённый снимок (live-сборка из КТП всё равно приоритетна) и обновляет `updatedAt`
+   * предмета — версия карты для учеников пересчитывается при следующем запросе.
    */
-  async adminRebuildCanonicalFromTopics(subjectId: string): Promise<{
+  async rebuildCanonicalFromKtp(subjectId: string): Promise<{
     subjectId: string;
     version: number;
     nodesCount: number;
@@ -881,36 +909,32 @@ class RoadmapService {
     const subject = await Subject.findById(subjectId).lean();
     if (!subject) throw AppError.notFound('Subject not found');
 
-    const nodes = buildTopicCanonicalNodes(subject);
+    const ktp = await KtpCatalog.findOne({ subjectId }).lean<IKtpCatalog>();
+    if (!ktp || !Array.isArray(ktp.topics) || ktp.topics.length === 0) {
+      throw AppError.badRequest('Сначала заведите справочник КТП по предмету (раздел «КТП»)');
+    }
+
+    const nodes = buildKtpCanonicalNodes(subject, ktp);
     if (nodes.length === 0) {
       throw AppError.badRequest(
-        'Нет тем в книгах этого предмета — добавьте темы в главы, чтобы построить карту'
+        'Ни одна тема книги не замаплена на КТП — при декомпозиции привяжите темы к темам КТП'
       );
     }
     assertValidCanonicalNodes(nodes);
 
     const subjectOid = new mongoose.Types.ObjectId(subjectId);
+    // Снимок не нужен (live-сборка приоритетна): удаляем устаревшие ручные/старые записи.
     await CanonicalRoadmap.deleteMany({ subjectId: subjectOid });
 
-    const nextVersion = Math.max(1, Math.floor(Date.now() / 1000));
+    const newUpdatedAt = new Date();
+    await Subject.findByIdAndUpdate(subjectId, { $set: { updatedAt: newUpdatedAt } });
 
-    await CanonicalRoadmap.findOneAndUpdate(
-      { subjectId: subjectOid },
-      {
-        $set: {
-          subjectId: subjectOid,
-          version: nextVersion,
-          nodes,
-          description: 'Синхронизировано с темами учебника (админ)'
-        },
-        $unset: { sourceMeta: 1 }
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+    const version = Math.max(
+      1,
+      Math.floor(Math.max(newUpdatedAt.getTime(), ktp.updatedAt ? new Date(ktp.updatedAt).getTime() : 0) / 1000)
     );
 
-    await Subject.findByIdAndUpdate(subjectId, { $set: { updatedAt: new Date() } });
-
-    return { subjectId, version: nextVersion, nodesCount: nodes.length };
+    return { subjectId, version, nodesCount: nodes.length };
   }
 }
 

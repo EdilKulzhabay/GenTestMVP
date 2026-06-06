@@ -1,5 +1,4 @@
 import { Subject, User, ProfileSubjectPair } from '../models';
-import { topicNodeId } from '../utils/roadmapChapter.util';
 import { AppError } from '../utils';
 /** Порядок и объём как в едином национальном тестировании (Казахстан) — в формате вопросов ЕНТ */
 const MAIN_TRIAL_TITLES = [
@@ -33,13 +32,9 @@ function assertSubjectNodeForTrial(subj: any, needTitle: string) {
       `У предмета «${needTitle}» в первой главе нет тем — добавьте тему для привязки к карте знаний`
     );
   }
-  const bid = book._id.toString();
-  const cid = chapter._id.toString();
-  const tid = firstTopic._id.toString();
   return {
-    bookId: bid,
-    chapterId: cid,
-    nodeId: topicNodeId(bid, cid, tid),
+    bookId: book._id.toString(),
+    chapterId: chapter._id.toString(),
     chapterTitle: chapter.title,
     topicTitle: firstTopic.title
   };
@@ -110,7 +105,6 @@ export class TrialService {
       subjectTitle: string;
       bookId: string;
       chapterId: string;
-      nodeId: string;
       chapterTitle: string;
       topicTitle: string;
       questionCount: number;
@@ -136,7 +130,6 @@ export class TrialService {
         subjectTitle: subj.title || titleNeed,
         bookId: meta.bookId,
         chapterId: meta.chapterId,
-        nodeId: meta.nodeId,
         chapterTitle: meta.chapterTitle,
         topicTitle: meta.topicTitle,
         questionCount: blk.questionCount,
@@ -154,7 +147,6 @@ export class TrialService {
         subjectTitle: t,
         bookId: meta.bookId,
         chapterId: meta.chapterId,
-        nodeId: meta.nodeId,
         chapterTitle: meta.chapterTitle,
         topicTitle: meta.topicTitle,
         questionCount: 40,
