@@ -17,6 +17,7 @@ import { SubjectImportPage } from '../pages/admin/SubjectImportPage';
 import { ProfileSubjectPairAdminPage } from '../pages/admin/ProfileSubjectPairAdminPage';
 import { RoadmapCanonicalCreatePage } from '../pages/admin/RoadmapCanonicalCreatePage';
 import { RoadmapCanonicalViewPage } from '../pages/admin/RoadmapCanonicalViewPage';
+import { KtpCatalogPage } from '../pages/admin/KtpCatalogPage';
 import { SubjectDetailPage } from '../pages/admin/SubjectDetailPage';
 import { UserDashboard } from '../pages/user/UserDashboard';
 import { SubjectSelectPage } from '../pages/user/SubjectSelectPage';
@@ -49,7 +50,7 @@ const RootRedirect: React.FC = () => {
     return <Navigate to="/welcome" replace />;
   }
 
-  if (user?.role === 'admin') {
+  if (user?.role === 'admin' || user?.role === 'teacher') {
     return <Navigate to="/admin" replace />;
   }
 
@@ -92,7 +93,7 @@ export const router = createBrowserRouter([
     ]
   },
   {
-    element: <PrivateRoute roles={['admin']} />,
+    element: <PrivateRoute roles={['admin', 'teacher']} />,
     children: [
       {
         element: <AdminLayout />,
@@ -106,7 +107,8 @@ export const router = createBrowserRouter([
           { path: '/admin/contents/new', element: <ContentCreatePage /> },
           { path: '/admin/profile-subject-pairs', element: <ProfileSubjectPairAdminPage /> },
           { path: '/admin/roadmaps/create', element: <RoadmapCanonicalCreatePage /> },
-          { path: '/admin/roadmaps/:subjectId', element: <RoadmapCanonicalViewPage /> }
+          { path: '/admin/roadmaps/:subjectId', element: <RoadmapCanonicalViewPage /> },
+          { path: '/admin/ktp/:subjectId', element: <KtpCatalogPage /> }
         ]
       }
     ]

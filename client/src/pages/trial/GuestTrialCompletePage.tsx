@@ -23,7 +23,7 @@ export const GuestTrialCompletePage: React.FC = () => {
           <ul className="space-y-2 text-sm">
             {rows.map((r, i) => (
               <li
-                key={`${r.nodeId}-${i}`}
+                key={`${r.subjectId}-${i}`}
                 className="flex justify-between gap-2 border-b border-slate-100 pb-2 last:border-0"
               >
                 <span className="text-slate-700">

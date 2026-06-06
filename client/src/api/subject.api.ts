@@ -128,6 +128,21 @@ export const subjectApi = {
     await axiosInstance.delete(`/subjects/${subjectId}/books/${bookId}/chapters/${chapterId}/topics/${topicId}`);
   },
 
+  /** Маппинг темы книги на темы КТП (M:N) */
+  async setTopicKtp(
+    subjectId: string,
+    bookId: string,
+    chapterId: string,
+    topicId: string,
+    ktpTopicIds: string[]
+  ): Promise<Subject> {
+    const { data } = await axiosInstance.put<ApiResponse<Subject>>(
+      `/subjects/${subjectId}/books/${bookId}/chapters/${chapterId}/topics/${topicId}/ktp`,
+      { ktpTopicIds }
+    );
+    return data.data;
+  },
+
   async deleteParagraph(subjectId: string, bookId: string, chapterId: string, topicId: string, paragraphId: string): Promise<void> {
     await axiosInstance.delete(`/subjects/${subjectId}/books/${bookId}/chapters/${chapterId}/topics/${topicId}/paragraphs/${paragraphId}`);
   }

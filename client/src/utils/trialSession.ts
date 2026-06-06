@@ -8,7 +8,6 @@ export interface TrialStep {
   subjectTitle: string;
   bookId: string;
   chapterId: string;
-  nodeId: string;
   chapterTitle: string;
   topicTitle: string;
   questionCount: number;
@@ -19,7 +18,6 @@ export interface TrialStep {
 
 export interface TrialResultRow {
   subjectId: string;
-  nodeId: string;
   scorePercent: number;
   subjectTitle: string;
   chapterTitle: string;
@@ -90,7 +88,6 @@ export function appendTrialStepResult(
   }
   s.results.push({
     subjectId: step.subjectId,
-    nodeId: step.nodeId,
     scorePercent,
     subjectTitle: step.subjectTitle,
     chapterTitle: step.chapterTitle,

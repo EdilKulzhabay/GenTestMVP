@@ -87,6 +87,14 @@ export interface RoadmapPickerSubjectItem {
   nodesMastered: number;
 }
 
+export interface RoadmapLessonListItem {
+  lessonId: string;
+  title: string;
+  order: number;
+  completed: boolean;
+  locked: boolean;
+}
+
 export interface RoadmapLessonResponse {
   nodeId: string;
   lessonId: string;
@@ -97,4 +105,11 @@ export interface RoadmapLessonResponse {
   textFormat?: 'markdown' | 'html';
   video: { url: string; durationSec?: number; posterUrl?: string } | null;
   readCompletedAt: string | null;
+  /** Уроки узла (тема КТП может содержать несколько уроков из разных книг/классов) */
+  lessons: RoadmapLessonListItem[];
+  lessonsTotal: number;
+  lessonIndex: number;
+  nextLessonId: string | null;
+  prevLessonId: string | null;
+  locked: boolean;
 }
