@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { subjectApi } from '../../api/subject.api';
 import { roadmapApi } from '../../api/roadmap.api';
 import { ktpApi } from '../../api/ktp.api';
@@ -9,6 +9,7 @@ import { Loader } from '../../components/ui/Loader';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
 import { SuccessMessage } from '../../components/ui/SuccessMessage';
 import { Button } from '../../components/ui/Button';
+import { ConfirmDeleteBtn } from '../../components/ui/ConfirmDeleteBtn';
 import { getApiErrorMessage } from '../../utils/error';
 import { useAuth } from '../../store/auth.store';
 
@@ -86,41 +87,6 @@ const EditableTitle: React.FC<{
       {text}
       <span className="ml-1.5 text-xs text-slate-300 opacity-0 transition group-hover/edit:opacity-100">✏️</span>
     </Tag>
-  );
-};
-
-const ConfirmDeleteBtn: React.FC<{ label?: string; onConfirm: () => Promise<void> }> = ({
-  label = 'Удалить',
-  onConfirm
-}) => {
-  const [confirming, setConfirming] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
-  if (confirming) {
-    return (
-      <span className="inline-flex items-center gap-1 text-xs">
-        <span className="text-red-600">Точно?</span>
-        <button
-          onClick={async () => {
-            setDeleting(true);
-            await onConfirm();
-          }}
-          disabled={deleting}
-          className="font-medium text-red-600 hover:underline"
-        >
-          {deleting ? '…' : 'Да'}
-        </button>
-        <button onClick={() => setConfirming(false)} className="text-slate-400 hover:underline">
-          Нет
-        </button>
-      </span>
-    );
-  }
-
-  return (
-    <button onClick={() => setConfirming(true)} className="text-xs text-red-400 hover:text-red-600">
-      {label}
-    </button>
   );
 };
 
@@ -238,6 +204,7 @@ const RebuildRoadmapButton: React.FC<{
 /* ───── main page ───── */
 
 export const SubjectDetailPage: React.FC = () => {
+  const navigate = useNavigate();
   const { subjectId } = useParams<{ subjectId: string }>();
   const { user } = useAuth();
   const isAdminUser = user?.role === 'admin';
@@ -333,6 +300,27 @@ export const SubjectDetailPage: React.FC = () => {
             <option value="main">Основной</option>
             <option value="profile">Профильный</option>
           </select>
+        </div>
+
+        <div className="mt-6 rounded-lg border border-red-100 bg-red-50/40 px-4 py-3 text-sm">
+          <p className="font-medium text-red-900">Опасная зона</p>
+          <p className="mt-1 text-xs text-red-800/90">
+            Удаление навсегда убирает предмет из каталога, все книги и контент, тесты, карты знаний, прогресс по этому
+            предмету и пары профилей, где он участвует.
+          </p>
+          <div className="mt-2">
+            <ConfirmDeleteBtn
+              label="Удалить предмет"
+              onConfirm={async () => {
+                try {
+                  await subjectApi.deleteSubject(sid);
+                  navigate('/admin', { replace: true });
+                } catch (err) {
+                  setError(getApiErrorMessage(err));
+                }
+              }}
+            />
+          </div>
         </div>
       </div>
 

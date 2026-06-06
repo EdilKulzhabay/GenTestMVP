@@ -1,7 +1,18 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import { Subject } from '../models';
-import { KtpCatalog } from '../models/KtpCatalog.model';
+import {
+  Subject,
+  Test,
+  CanonicalRoadmap,
+  UserRoadmapProgress,
+  RoadmapAttempt,
+  RoadmapChatAttachment,
+  SoloAttempt,
+  SoloSession,
+  ProfileSubjectPair,
+  User,
+  KtpCatalog
+} from '../models';
 import {
   ICreateSubjectDTO,
   IAddBookDTO,
@@ -230,9 +241,43 @@ class SubjectController {
     success(res, subject, 'Subject updated');
   }
 
+  /**
+   * DELETE /subjects/:id — удалить предмет и связанные данные (тесты, дорожные карты, попытки, пары профилей и т.д.).
+   */
   async deleteSubject(req: Request, res: Response): Promise<void> {
-    const subject = await this.findSubject(req.params.id);
-    await subject.deleteOne();
+    const id = String(req.params.id);
+    if (!mongoose.isValidObjectId(id)) throw AppError.badRequest('Invalid subject id');
+    const oid = new mongoose.Types.ObjectId(id);
+
+    const exists = await Subject.findById(id).select('_id').lean();
+    if (!exists) throw AppError.notFound('Subject not found');
+
+    const tests = await Test.find({ subjectId: oid }).select('_id').lean();
+    const testIds = tests.map((t) => t._id);
+    if (testIds.length) {
+      await SoloSession.deleteMany({ testId: { $in: testIds } });
+    }
+    await SoloAttempt.deleteMany({ subjectId: oid });
+    await Test.deleteMany({ subjectId: oid });
+    await CanonicalRoadmap.deleteMany({ subjectId: oid });
+    await UserRoadmapProgress.deleteMany({ subjectId: oid });
+    await RoadmapAttempt.deleteMany({ subjectId: oid });
+    await RoadmapChatAttachment.deleteMany({ subjectId: oid });
+
+    const affectedPairs = await ProfileSubjectPair.find({
+      $or: [{ subject1Id: oid }, { subject2Id: oid }]
+    })
+      .select('_id')
+      .lean();
+    const pairIds = affectedPairs.map((p) => p._id);
+    if (pairIds.length) {
+      await User.updateMany({ profileSubjectPairId: { $in: pairIds } }, { $unset: { profileSubjectPairId: 1 } });
+    }
+    await ProfileSubjectPair.deleteMany({ $or: [{ subject1Id: oid }, { subject2Id: oid }] });
+
+    await User.updateMany({ 'testHistory.subjectId': oid }, { $pull: { testHistory: { subjectId: oid } } });
+
+    await Subject.deleteOne({ _id: oid });
     success(res, { deleted: true }, 'Subject deleted');
   }
 

@@ -170,7 +170,8 @@ export const TestStartPage: React.FC = () => {
         ...(roadmapNodeId && !trialFlow ? { roadmapNodeId } : {}),
         ...(typeof resolvedQuestionCount === 'number' && resolvedQuestionCount > 0
           ? { questionCount: resolvedQuestionCount }
-          : {})
+          : {}),
+        ...(trialFlow ? { forTrial: true } : {})
       };
 
       const test =
