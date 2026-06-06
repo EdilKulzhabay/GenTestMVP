@@ -44,7 +44,7 @@ export interface ICanonicalNodeSource {
   title?: string;
 }
 
-/** Урок внутри узла КТП (metadata.lessons[]). Один урок = одна замапленная тема книги. */
+/** Урок внутри узла КТП. Сырой режим: 1 урок = 1 источник; консолидированный: 1..N секций. */
 export interface ICanonicalNodeLesson {
   lessonId: string;
   title: string;
@@ -54,6 +54,19 @@ export interface ICanonicalNodeLesson {
   summary?: string;
   video?: IRoadmapLessonVideo | null;
   source?: ICanonicalNodeSource;
+}
+
+/** Кэш AI-консолидированного контента урока узла КТП (коллекция node_lesson_content). */
+export interface INodeLessonContent {
+  _id?: Types.ObjectId;
+  subjectId: Types.ObjectId;
+  ktpTopicId: Types.ObjectId;
+  /** Хэш текстов замапленных источников: при изменении — кэш пересобирается */
+  sourceHash: string;
+  lessons: ICanonicalNodeLesson[];
+  generatedBy: 'ai' | 'manual';
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 /** Откуда сгенерирована статичная карта (книга/глава) — для UI и трассировки */
@@ -119,6 +132,12 @@ export interface IRoadmapLessonMeta {
   video?: IRoadmapLessonVideo | null;
 }
 
+/** Источник урока для UI («Источники»): книга/класс + тема книги */
+export interface IRoadmapLessonSource {
+  bookTitle?: string;
+  topicTitle?: string;
+}
+
 /** Элемент списка уроков узла (для степпера с последовательным гейтингом) */
 export interface IRoadmapLessonListItem {
   lessonId: string;
@@ -151,6 +170,8 @@ export interface IRoadmapLessonResponse {
   prevLessonId: string | null;
   /** Текущий урок заблокирован (предыдущий не завершён) */
   locked: boolean;
+  /** Источники узла (темы книг разных классов) — для трассируемости консолидированного урока */
+  sources: IRoadmapLessonSource[];
 }
 
 /** Элемент списка предметов для bottom sheet (согласован с GET /roadmaps/personal) */

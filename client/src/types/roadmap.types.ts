@@ -112,4 +112,6 @@ export interface RoadmapLessonResponse {
   nextLessonId: string | null;
   prevLessonId: string | null;
   locked: boolean;
+  /** Источники узла (темы книг разных классов), из которых собран урок */
+  sources: Array<{ bookTitle?: string; topicTitle?: string }>;
 }

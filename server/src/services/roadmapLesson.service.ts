@@ -11,7 +11,7 @@ import {
   IRoadmapLessonListItem,
   IRoadmapLessonResponse
 } from '../types/roadmap.types';
-import { getNodeLessons } from '../utils/nodeLessons.util';
+import { resolveNodeLessons, nodeLessonIds, describeNodeSources } from './nodeLessonContent.service';
 import { roadmapAIService } from './roadmap.ai.service';
 import { roadmapService } from './roadmap.service';
 import { AppError } from '../utils';
@@ -111,7 +111,7 @@ class RoadmapLessonService {
     if (!subject) throw AppError.notFound('Subject not found');
 
     const node = await this.resolveNode(subjectId, nodeId);
-    const lessons = getNodeLessons(node);
+    const lessons = await resolveNodeLessons(subjectId, subject, node);
     if (lessons.length === 0) throw AppError.notFound('Lesson not found for this node');
 
     const progress = await roadmapService.getNodeProgress(userId, subjectId, nodeId);
@@ -162,7 +162,8 @@ class RoadmapLessonService {
       lessonIndex: targetIdx,
       nextLessonId: targetIdx < lessons.length - 1 ? lessons[targetIdx + 1].lessonId : null,
       prevLessonId: targetIdx > 0 ? lessons[targetIdx - 1].lessonId : null,
-      locked: listItems[targetIdx]?.locked ?? false
+      locked: listItems[targetIdx]?.locked ?? false,
+      sources: describeNodeSources(subject, node)
     };
   }
 
@@ -179,27 +180,17 @@ class RoadmapLessonService {
     if (!mongoose.isValidObjectId(subjectId)) throw AppError.badRequest('Invalid subjectId');
 
     const node = await this.resolveNode(subjectId, nodeId);
-    const lessons = getNodeLessons(node);
-    if (lessons.length === 0) throw AppError.notFound('Lesson not found for this node');
-
-    const progress = await roadmapService.getNodeProgress(userId, subjectId, nodeId);
-    const completedSet = new Set((progress?.lessons ?? []).map((l) => l.lessonId));
+    const lessonIds = await nodeLessonIds(subjectId, node);
+    if (lessonIds.length === 0) throw AppError.notFound('Lesson not found for this node');
 
     let targetId = lessonId?.trim();
     if (!targetId) {
-      const firstIncomplete = lessons.find((l) => !completedSet.has(l.lessonId));
-      targetId = (firstIncomplete ?? lessons[lessons.length - 1]).lessonId;
+      const progress = await roadmapService.getNodeProgress(userId, subjectId, nodeId);
+      const completed = new Set((progress?.lessons ?? []).map((l) => l.lessonId));
+      targetId = lessonIds.find((id) => !completed.has(id)) ?? lessonIds[lessonIds.length - 1];
     }
 
-    const idx = lessons.findIndex((l) => l.lessonId === targetId);
-    if (idx < 0) throw AppError.badRequest('Unknown lessonId for this node');
-    // гейтинг: все предыдущие уроки должны быть завершены
-    for (let i = 0; i < idx; i++) {
-      if (!completedSet.has(lessons[i].lessonId)) {
-        throw AppError.badRequest('Сначала завершите предыдущие уроки этого узла');
-      }
-    }
-
+    // Валидация lessonId и последовательный гейтинг — в markLessonComplete.
     return roadmapService.markLessonComplete(userId, subjectId, nodeId, targetId);
   }
 
@@ -220,7 +211,7 @@ class RoadmapLessonService {
     if (!subject) throw AppError.notFound('Subject not found');
 
     const node = await this.resolveNode(subjectId, nodeId);
-    const lessons = getNodeLessons(node);
+    const lessons = await resolveNodeLessons(subjectId, subject, node);
     const lesson =
       (input.lessonId && lessons.find((l) => l.lessonId === input.lessonId)) || lessons[0];
     const lessonText = lesson ? normalizeLessonContent(lesson.content, lesson.contentFormat) : '';

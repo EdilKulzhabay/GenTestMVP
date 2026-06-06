@@ -10,6 +10,7 @@ export { PendingRegistration } from './PendingRegistration.model';
 export { TelegramPhoneLink } from './TelegramPhoneLink.model';
 export { CanonicalRoadmap } from './CanonicalRoadmap.model';
 export { KtpCatalog } from './KtpCatalog.model';
+export { NodeLessonContent } from './NodeLessonContent.model';
 export { UserRoadmapProgress } from './UserRoadmapProgress.model';
 export { RoadmapAttempt } from './RoadmapAttempt.model';
 export { RoadmapChatAttachment } from './RoadmapChatAttachment.model';

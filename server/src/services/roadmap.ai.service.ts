@@ -362,6 +362,85 @@ class RoadmapAIService {
     };
     return String(data.choices?.[0]?.message?.content ?? '').trim();
   }
+
+  /**
+   * Консолидация урока узла КТП: из фрагментов учебников разных классов по ОДНОЙ теме
+   * собирает один связный дедуплицированный урок (или 2–4, если материала много).
+   */
+  async consolidateLessonContent(input: {
+    subjectTitle: string;
+    nodeTitle: string;
+    sources: Array<{ label: string; text: string }>;
+  }): Promise<Array<{ title: string; summary?: string; content: string }>> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw AppError.badRequest('OPENAI_API_KEY is not set');
+
+    const MAX_TOTAL = 24000;
+    let used = 0;
+    const blocks: string[] = [];
+    for (const s of input.sources) {
+      if (used >= MAX_TOTAL) break;
+      const remaining = MAX_TOTAL - used;
+      const t = s.text.length > remaining ? `${s.text.slice(0, remaining)}\n[обрезано]` : s.text;
+      used += t.length;
+      blocks.push(`### Источник: ${s.label}\n${t}`);
+    }
+    const sourcesBlock = blocks.join('\n\n');
+
+    const prompt = [
+      'Ниже — фрагменты учебников разных классов по ОДНОЙ теме. Собери из них единый урок для ученика.',
+      'Требования:',
+      '- Объедини материал, убери дословные повторы между источниками; сохрани ВСЕ различные факты (ничего важного не теряй).',
+      '- Упорядочи изложение от базового к продвинутому.',
+      '- Пиши на языке источников. НЕ добавляй фактов, которых нет в источниках. Не упоминай «класс/учебник/источник» в тексте.',
+      '- По умолчанию ОДИН урок. Если материала очень много — раздели на 2–4 последовательных урока по подтемам.',
+      'Верни ТОЛЬКО строгий JSON без Markdown-обёртки:',
+      '{ "lessons": [ { "title": "название урока", "summary": "1-2 предложения", "content": "тело урока в Markdown" } ] }',
+      '',
+      `Предмет: ${input.subjectTitle}. Тема: ${input.nodeTitle}.`,
+      '',
+      'Источники:',
+      sourcesBlock
+    ].join('\n');
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: MODEL,
+        temperature: 0.3,
+        max_tokens: 3000,
+        messages: [
+          {
+            role: 'system',
+            content: 'Ты методист; собираешь единый дедуплицированный урок строго из переданных фрагментов учебников. Ответ — строгий JSON.'
+          },
+          { role: 'user', content: prompt }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('[roadmap AI] lesson consolidation failed', response.status, errText);
+      throw new Error(`OpenAI: ${response.status}`);
+    }
+
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const raw = data.choices?.[0]?.message?.content ?? '';
+    const parsed = parseJsonObject(raw);
+    const lessonsRaw = parsed.lessons;
+    if (!Array.isArray(lessonsRaw) || lessonsRaw.length === 0) {
+      throw AppError.badRequest('AI returned no lessons');
+    }
+    return lessonsRaw
+      .map((l: any) => ({
+        title: String(l?.title ?? '').trim() || input.nodeTitle,
+        ...(typeof l?.summary === 'string' && l.summary.trim() ? { summary: l.summary.trim() } : {}),
+        content: String(l?.content ?? '').trim()
+      }))
+      .filter((l) => l.content);
+  }
 }
 
 export const roadmapAIService = new RoadmapAIService();

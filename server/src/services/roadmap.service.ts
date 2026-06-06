@@ -7,7 +7,7 @@ import { Subject, User, Test } from '../models';
 import { roadmapAIService } from './roadmap.ai.service';
 import { assertValidCanonicalNodes } from '../utils/roadmapGraph';
 import { buildKtpCanonicalNodes } from '../utils/roadmapKtp.util';
-import { getNodeLessonIds } from '../utils/nodeLessons.util';
+import { nodeLessonIds } from './nodeLessonContent.service';
 import {
   ICanonicalRoadmapNode,
   ICanonicalRoadmapSourceMeta,
@@ -813,7 +813,7 @@ class RoadmapService {
     const bundle = await this.resolveCanonical(subjectId);
     const node = bundle.nodes.find((n) => n.nodeId === nodeId);
     if (!node) throw AppError.badRequest('Unknown nodeId for this subject');
-    const lessonIds = getNodeLessonIds(node);
+    const lessonIds = await nodeLessonIds(subjectId, node);
     if (!lessonIds.includes(lessonId)) throw AppError.badRequest('Unknown lessonId for this node');
 
     const canonicalNodes = bundle.nodes;
@@ -821,6 +821,15 @@ class RoadmapService {
     const merged = this.mergeProgressWithCanonical(canonicalNodes, raw?.nodes ?? []);
     const map = progressMap(merged);
     const cur = map.get(nodeId) ?? defaultProgress(nodeId);
+
+    // последовательный гейтинг: все предыдущие по порядку уроки должны быть завершены
+    const alreadyCompleted = new Set((cur.lessons ?? []).map((l) => l.lessonId));
+    const targetIdx = lessonIds.indexOf(lessonId);
+    for (let i = 0; i < targetIdx; i++) {
+      if (!alreadyCompleted.has(lessonIds[i])) {
+        throw AppError.badRequest('Сначала завершите предыдущие уроки этого узла');
+      }
+    }
 
     const now = new Date();
     const lessons = [...(cur.lessons ?? [])];

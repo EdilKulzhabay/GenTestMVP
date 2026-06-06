@@ -215,6 +215,16 @@ export const RoadmapNodeMaterialPage: React.FC = () => {
         )}
       </div>
 
+      {(lesson?.sources?.length ?? 0) > 0 ? (
+        <p className="text-xs text-slate-500">
+          <span className="font-medium text-slate-600">Источники: </span>
+          {lesson!.sources
+            .map((s) => [s.bookTitle, s.topicTitle].filter(Boolean).join(' · '))
+            .filter(Boolean)
+            .join(', ')}
+        </p>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-3">
         {!currentCompleted ? (
           <Button onClick={() => void onCompleteLesson()} isLoading={completing}>
