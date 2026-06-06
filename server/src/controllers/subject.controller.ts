@@ -11,7 +11,8 @@ import {
   SoloSession,
   ProfileSubjectPair,
   User,
-  KtpCatalog
+  KtpCatalog,
+  NodeLessonContent
 } from '../models';
 import {
   ICreateSubjectDTO,
@@ -260,6 +261,8 @@ class SubjectController {
     await SoloAttempt.deleteMany({ subjectId: oid });
     await Test.deleteMany({ subjectId: oid });
     await CanonicalRoadmap.deleteMany({ subjectId: oid });
+    await KtpCatalog.deleteMany({ subjectId: oid });
+    await NodeLessonContent.deleteMany({ subjectId: oid });
     await UserRoadmapProgress.deleteMany({ subjectId: oid });
     await RoadmapAttempt.deleteMany({ subjectId: oid });
     await RoadmapChatAttachment.deleteMany({ subjectId: oid });
