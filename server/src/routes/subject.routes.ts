@@ -249,7 +249,18 @@ router.patch(
 router.patch(
   '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/paragraphs/:paragraphId',
   isTeacherOrAdmin,
-  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), param('topicId').isMongoId(), param('paragraphId').isMongoId()],
+  [
+    param('subjectId').isMongoId(),
+    param('bookId').isMongoId(),
+    param('chapterId').isMongoId(),
+    param('topicId').isMongoId(),
+    param('paragraphId').isMongoId(),
+    body('order').optional().isInt({ min: 0 }).withMessage('order must be a non-negative integer'),
+    body('content').optional().isObject(),
+    body('content.text').optional().isString().isLength({ min: 1 }).withMessage('content.text must be non-empty'),
+    body('content.pages').optional().isArray(),
+    body('content.metadata').optional().isObject()
+  ],
   validate,
   asyncHandler(subjectController.updateParagraph.bind(subjectController))
 );
