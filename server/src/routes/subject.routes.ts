@@ -246,6 +246,14 @@ router.patch(
   asyncHandler(subjectController.updateTopic.bind(subjectController))
 );
 
+router.patch(
+  '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/paragraphs/:paragraphId',
+  isTeacherOrAdmin,
+  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), param('topicId').isMongoId(), param('paragraphId').isMongoId()],
+  validate,
+  asyncHandler(subjectController.updateParagraph.bind(subjectController))
+);
+
 /**
  * @route   PUT /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/ktp
  * @desc    Маппинг темы книги на темы КТП (M:N)

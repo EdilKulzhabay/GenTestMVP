@@ -343,6 +343,25 @@ class SubjectController {
     success(res, subject, 'Topic updated');
   }
 
+  /** PATCH /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/paragraphs/:paragraphId */
+  async updateParagraph(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    if (!chapter) throw AppError.notFound('Chapter not found');
+    const topic = chapter.topics.find((t) => t._id?.toString() === req.params.topicId);
+    if (!topic) throw AppError.notFound('Topic not found');
+    const paragraph = topic.paragraphs.find((p) => p._id?.toString() === req.params.paragraphId);
+    if (!paragraph) throw AppError.notFound('Paragraph not found');
+
+    const { order, content } = req.body;
+    if (order !== undefined) paragraph.order = order;
+    if (content !== undefined) paragraph.content = content;
+    await subject.save();
+    success(res, subject, 'Paragraph updated');
+  }
+
   /**
    * PUT /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/ktp
    * Маппинг темы книги на темы КТП (M:N). Тело: { ktpTopicIds: string[] }.
