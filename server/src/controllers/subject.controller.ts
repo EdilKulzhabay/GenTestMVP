@@ -23,6 +23,18 @@ import {
 } from '../types';
 import { success, AppError } from '../utils';
 
+/**
+ * Проверяет, что posted — перестановка existing (тот же набор id, без пропусков/дублей/чужих).
+ * Иначе reorder мог бы молча потерять элементы или продублировать order.
+ */
+function assertPermutation(posted: string[], existing: (string | undefined)[], field: string): void {
+  const have = existing.filter((id): id is string => Boolean(id));
+  const postedSet = new Set(posted);
+  if (posted.length !== have.length || postedSet.size !== posted.length || !have.every((id) => postedSet.has(id))) {
+    throw AppError.badRequest(`${field} must list exactly the existing ids once each`);
+  }
+}
+
 class SubjectController {
   private async findSubject(id: string) {
     const subject = await Subject.findById(id);
@@ -184,8 +196,9 @@ class SubjectController {
     const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
     if (!book) throw AppError.notFound('Book not found');
 
-    const { title, order }: IAddChapterDTO = req.body;
-    book.chapters.push({ title, order, topics: [] });
+    const { title }: IAddChapterDTO = req.body;
+    // Порядок назначаем на сервере (в конец), чтобы избежать коллизий order после удалений в середине.
+    book.chapters.push({ title, order: book.chapters.length, topics: [] });
     await subject.save();
     success(res, subject, 'Chapter added successfully', 201);
   }
@@ -388,6 +401,7 @@ class SubjectController {
     if (!book) throw AppError.notFound('Book not found');
     const { orderedChapterIds } = req.body as { orderedChapterIds?: string[] };
     if (!Array.isArray(orderedChapterIds)) throw AppError.badRequest('orderedChapterIds must be an array');
+    assertPermutation(orderedChapterIds, book.chapters.map((c) => c._id?.toString()), 'orderedChapterIds');
     orderedChapterIds.forEach((id, i) => {
       const ch = book.chapters.find((c) => c._id?.toString() === id);
       if (ch) ch.order = i;
@@ -405,6 +419,7 @@ class SubjectController {
     if (!chapter) throw AppError.notFound('Chapter not found');
     const { orderedTopicIds } = req.body as { orderedTopicIds?: string[] };
     if (!Array.isArray(orderedTopicIds)) throw AppError.badRequest('orderedTopicIds must be an array');
+    assertPermutation(orderedTopicIds, chapter.topics.map((t) => t._id?.toString()), 'orderedTopicIds');
     orderedTopicIds.forEach((id, i) => {
       const t = chapter.topics.find((tp) => tp._id?.toString() === id);
       if (t) t.order = i;
@@ -424,6 +439,7 @@ class SubjectController {
     if (!topic) throw AppError.notFound('Topic not found');
     const { orderedParagraphIds } = req.body as { orderedParagraphIds?: string[] };
     if (!Array.isArray(orderedParagraphIds)) throw AppError.badRequest('orderedParagraphIds must be an array');
+    assertPermutation(orderedParagraphIds, topic.paragraphs.map((p) => p._id?.toString()), 'orderedParagraphIds');
     orderedParagraphIds.forEach((id, i) => {
       const p = topic.paragraphs.find((pp) => pp._id?.toString() === id);
       if (p) p.order = i;

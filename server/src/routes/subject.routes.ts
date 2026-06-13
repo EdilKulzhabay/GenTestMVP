@@ -128,7 +128,12 @@ router.post(
     param('subjectId').isMongoId(),
     body('book').isObject().withMessage('book is required'),
     body('book.title').trim().isLength({ min: 1, max: 300 }).withMessage('book.title must be 1..300 chars'),
-    body('book.chapters').optional().isArray()
+    body('book.chapters').optional().isArray().withMessage('book.chapters must be an array'),
+    body('book.chapters.*.title').trim().isLength({ min: 1, max: 300 }).withMessage('chapter title must be 1..300 chars'),
+    body('book.chapters.*.topics').isArray().withMessage('chapter.topics must be an array'),
+    body('book.chapters.*.topics.*.title').trim().isLength({ min: 1, max: 300 }).withMessage('topic title must be 1..300 chars'),
+    body('book.chapters.*.topics.*.paragraphs').isArray().withMessage('topic.paragraphs must be an array'),
+    body('book.chapters.*.topics.*.paragraphs.*.content.text').trim().isLength({ min: 1 }).withMessage('paragraph content.text is required')
   ],
   validate,
   asyncHandler(subjectController.importBook.bind(subjectController))
@@ -217,8 +222,8 @@ router.post(
       .isLength({ min: 1 })
       .withMessage('Content text is required'),
     body('content.pages')
-      .isArray({ min: 1 })
-      .withMessage('Content must have at least one page number'),
+      .isArray()
+      .withMessage('Content pages must be an array'),
     body('content.metadata')
       .isObject()
       .withMessage('Content metadata is required')
