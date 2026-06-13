@@ -88,6 +88,13 @@ async function run(): Promise<void> {
         const bookN = Array.isArray(books) ? books.length : 0;
         console.log(`🔄 Обновлён: "${title}" — книг в сиде: ${bookN} (${name})`);
         updated++;
+      } else if (existing.subjectKind !== kind) {
+        // Бэкфилл только типа предмета (книги/описание не трогаем) —
+        // чтобы на уже засеянной БД профильные предметы получили subjectKind: profile
+        // и пары (seed:pairs) к ним привязались. Для книг — npm run seed:subjects:update.
+        await Subject.updateOne({ _id: existing._id }, { $set: { subjectKind: kind } });
+        console.log(`🔧 Тип обновлён: "${title}" → ${kind} (${name}); книги не тронуты`);
+        updated++;
       } else {
         console.log(`⏭  Уже есть: "${title}" (${name}) — для подтягивания книг: npm run seed:subjects:update`);
         skipped++;
@@ -110,7 +117,7 @@ async function run(): Promise<void> {
   if (doUpdate) {
     console.log(`Готово. Создано: ${created}, обновлено: ${updated}, пропущено: ${skipped}`);
   } else {
-    console.log(`Готово. Создано: ${created}, пропущено (дубликат по title): ${skipped}`);
+    console.log(`Готово. Создано: ${created}, тип обновлён: ${updated}, пропущено: ${skipped}`);
   }
 
   await mongoose.connection.close();

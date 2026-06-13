@@ -10,7 +10,9 @@
     "start": "node dist/server.js",
     "lint": "eslint . --ext .ts",
     "seed:subjects": "ts-node src/scripts/seedSubjects.ts",
-    "seed:subjects:update": "ts-node src/scripts/seedSubjects.ts --update"
+    "seed:subjects:update": "ts-node src/scripts/seedSubjects.ts --update",
+    "seed:pairs": "ts-node src/scripts/seedProfileSubjectPairs.ts",
+    "seed:catalog": "npm run seed:subjects && npm run seed:pairs"
   },
   "keywords": [
     "education",
