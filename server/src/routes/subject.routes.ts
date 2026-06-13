@@ -117,6 +117,24 @@ router.post(
 );
 
 /**
+ * @route   POST /subjects/:subjectId/books/import
+ * @desc    Импорт одной книги целиком (главы/темы/параграфы), напр. из Excel
+ * @access  teacher/admin
+ */
+router.post(
+  '/:subjectId/books/import',
+  isTeacherOrAdmin,
+  [
+    param('subjectId').isMongoId(),
+    body('book').isObject().withMessage('book is required'),
+    body('book.title').trim().isLength({ min: 1, max: 300 }).withMessage('book.title must be 1..300 chars'),
+    body('book.chapters').optional().isArray()
+  ],
+  validate,
+  asyncHandler(subjectController.importBook.bind(subjectController))
+);
+
+/**
  * @route   POST /subjects/books/:bookId/chapters
  * @desc    Добавить главу к книге
  * @access  Admin only

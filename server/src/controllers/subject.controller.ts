@@ -156,6 +156,25 @@ class SubjectController {
     success(res, subject, 'Book added successfully', 201);
   }
 
+  /** POST /subjects/:subjectId/books/import — добавить одну книгу целиком (главы/темы/параграфы) в предмет, не трогая остальные */
+  async importBook(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const { book } = req.body as {
+      book?: { title?: string; author?: string; contentLanguage?: string; chapters?: unknown[] };
+    };
+    if (!book || typeof book.title !== 'string' || !book.title.trim()) {
+      throw AppError.badRequest('book.title is required');
+    }
+    subject.books.push({
+      title: book.title.trim(),
+      author: book.author?.trim() || undefined,
+      contentLanguage: book.contentLanguage?.trim() || undefined,
+      chapters: Array.isArray(book.chapters) ? book.chapters : []
+    } as never);
+    await subject.save();
+    success(res, subject, 'Book imported successfully', 201);
+  }
+
   /** POST /subjects/books/:bookId/chapters */
   async addChapter(req: Request, res: Response): Promise<void> {
     const { subjectId } = req.query;
