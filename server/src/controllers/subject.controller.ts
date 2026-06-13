@@ -202,7 +202,7 @@ class SubjectController {
     if (!chapter) throw AppError.notFound('Chapter not found');
 
     const { title }: IAddTopicDTO = req.body;
-    chapter.topics.push({ title, paragraphs: [] });
+    chapter.topics.push({ title, order: chapter.topics.length, paragraphs: [] });
     await subject.save();
     success(res, subject, 'Topic added successfully', 201);
   }
@@ -379,6 +379,57 @@ class SubjectController {
     if (content !== undefined) paragraph.content = content;
     await subject.save();
     success(res, subject, 'Paragraph updated');
+  }
+
+  /** POST /subjects/:subjectId/books/:bookId/chapters/reorder { orderedChapterIds } */
+  async reorderChapters(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const { orderedChapterIds } = req.body as { orderedChapterIds?: string[] };
+    if (!Array.isArray(orderedChapterIds)) throw AppError.badRequest('orderedChapterIds must be an array');
+    orderedChapterIds.forEach((id, i) => {
+      const ch = book.chapters.find((c) => c._id?.toString() === id);
+      if (ch) ch.order = i;
+    });
+    await subject.save();
+    success(res, subject, 'Chapters reordered');
+  }
+
+  /** POST /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/reorder { orderedTopicIds } */
+  async reorderTopics(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    if (!chapter) throw AppError.notFound('Chapter not found');
+    const { orderedTopicIds } = req.body as { orderedTopicIds?: string[] };
+    if (!Array.isArray(orderedTopicIds)) throw AppError.badRequest('orderedTopicIds must be an array');
+    orderedTopicIds.forEach((id, i) => {
+      const t = chapter.topics.find((tp) => tp._id?.toString() === id);
+      if (t) t.order = i;
+    });
+    await subject.save();
+    success(res, subject, 'Topics reordered');
+  }
+
+  /** POST /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/paragraphs/reorder { orderedParagraphIds } */
+  async reorderParagraphs(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    if (!chapter) throw AppError.notFound('Chapter not found');
+    const topic = chapter.topics.find((t) => t._id?.toString() === req.params.topicId);
+    if (!topic) throw AppError.notFound('Topic not found');
+    const { orderedParagraphIds } = req.body as { orderedParagraphIds?: string[] };
+    if (!Array.isArray(orderedParagraphIds)) throw AppError.badRequest('orderedParagraphIds must be an array');
+    orderedParagraphIds.forEach((id, i) => {
+      const p = topic.paragraphs.find((pp) => pp._id?.toString() === id);
+      if (p) p.order = i;
+    });
+    await subject.save();
+    success(res, subject, 'Paragraphs reordered');
   }
 
   /**

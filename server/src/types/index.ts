@@ -38,6 +38,8 @@ export interface IParagraph {
 export interface ITopic {
   _id?: Types.ObjectId;
   title: string;
+  /** Порядок темы в главе (для drag-and-drop сортировки; необязателен для старых данных). */
+  order?: number;
   /** Темы КТП (KtpCatalog.topics._id), на которые замаплена эта тема книги. M:N. */
   ktpTopicIds?: Types.ObjectId[];
   paragraphs: IParagraph[];

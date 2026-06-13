@@ -69,6 +69,11 @@ const TopicSchema = new Schema<ITopic>({
     minlength: 1,
     maxlength: 200
   },
+  /** Порядок темы в главе (drag-and-drop). Необязателен для старых данных. */
+  order: {
+    type: Number,
+    min: 0
+  },
   /** Темы КТП (KtpCatalog.topics._id), на которые замаплена эта тема книги. M:N. */
   ktpTopicIds: [{ type: Schema.Types.ObjectId }],
   paragraphs: [ParagraphSchema]

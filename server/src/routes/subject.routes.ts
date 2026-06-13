@@ -283,6 +283,32 @@ router.patch(
   asyncHandler(subjectController.updateParagraph.bind(subjectController))
 );
 
+// ========== REORDER (drag-and-drop) ==========
+
+router.post(
+  '/:subjectId/books/:bookId/chapters/reorder',
+  isTeacherOrAdmin,
+  [param('subjectId').isMongoId(), param('bookId').isMongoId(), body('orderedChapterIds').isArray(), body('orderedChapterIds.*').isMongoId()],
+  validate,
+  asyncHandler(subjectController.reorderChapters.bind(subjectController))
+);
+
+router.post(
+  '/:subjectId/books/:bookId/chapters/:chapterId/topics/reorder',
+  isTeacherOrAdmin,
+  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), body('orderedTopicIds').isArray(), body('orderedTopicIds.*').isMongoId()],
+  validate,
+  asyncHandler(subjectController.reorderTopics.bind(subjectController))
+);
+
+router.post(
+  '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/paragraphs/reorder',
+  isTeacherOrAdmin,
+  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), param('topicId').isMongoId(), body('orderedParagraphIds').isArray(), body('orderedParagraphIds.*').isMongoId()],
+  validate,
+  asyncHandler(subjectController.reorderParagraphs.bind(subjectController))
+);
+
 /**
  * @route   PUT /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/ktp
  * @desc    Маппинг темы книги на темы КТП (M:N)
