@@ -45,7 +45,6 @@ export const API_PATHS = {
   },
   USERS: {
     ME: `${ROUTES.USERS}/me`,
-    ME_AVATAR: `${ROUTES.USERS}/me/avatar`,
     ME_PROFILE_STATS: `${ROUTES.USERS}/me/profile-stats`,
     ME_TESTS: `${ROUTES.USERS}/me/tests`,
     ME_STATS: `${ROUTES.USERS}/me/stats`,

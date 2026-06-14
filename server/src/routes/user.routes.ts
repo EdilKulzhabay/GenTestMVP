@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { body, param, query } from 'express-validator';
 import { userController } from '../controllers';
-import { authenticate, asyncHandler, validate, userAvatarUpload } from '../middlewares';
+import { authenticate, asyncHandler, validate } from '../middlewares';
 
 /**
  * USER ROUTES
@@ -44,27 +44,6 @@ router.patch(
   ],
   validate,
   asyncHandler(userController.updateProfile.bind(userController))
-);
-
-/**
- * @route   POST /users/me/avatar
- * @desc    Загрузка аватарки (multipart, поле "avatar")
- * @access  Private
- */
-router.post(
-  '/me/avatar',
-  userAvatarUpload.single('avatar'),
-  asyncHandler(userController.uploadAvatar.bind(userController))
-);
-
-/**
- * @route   DELETE /users/me/avatar
- * @desc    Удалить аватарку
- * @access  Private
- */
-router.delete(
-  '/me/avatar',
-  asyncHandler(userController.deleteAvatar.bind(userController))
 );
 
 router.patch(

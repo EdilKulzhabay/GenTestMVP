@@ -1,4 +1,3 @@
-import path from 'path';
 import express, { Application } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -63,9 +62,6 @@ app.get('/', (_req, res) => {
 
 // Swagger UI
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
-// Статика загруженных файлов (аватарки и т.п.): /uploads/avatars/<userId>/<file>
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Отладка: GET /api/v1/debug — показывает, что запрос доходит до сервера
 app.get(`${API_BASE_PATH}/debug`, (req, res) => {

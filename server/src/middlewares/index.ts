@@ -29,10 +29,3 @@ export {
   ROADMAP_CHAT_MAX_BYTES,
   ROADMAP_CHAT_UPLOAD_ROOT
 } from './roadmapChatUpload.middleware';
-
-export {
-  userAvatarUpload,
-  buildAvatarUrl,
-  USER_AVATAR_MAX_BYTES,
-  USER_AVATAR_UPLOAD_ROOT
-} from './userAvatarUpload.middleware';

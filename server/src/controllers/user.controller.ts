@@ -1,10 +1,7 @@
 import { Request, Response } from 'express';
-import fs from 'fs/promises';
-import path from 'path';
 import { User, ProfileSubjectPair, Test } from '../models';
 import { success, AppError } from '../utils';
 import { testResultService, profileStatsService } from '../services';
-import { buildAvatarUrl, USER_AVATAR_UPLOAD_ROOT } from '../middlewares';
 import { ITestHistory, IUserAnswer } from '../types';
 
 class UserController {
@@ -62,29 +59,6 @@ class UserController {
       .populate(this.pairPopulate());
     if (!user) throw AppError.notFound('User not found');
     success(res, user, 'Профиль обновлён');
-  }
-
-  /** POST /users/me/avatar — загрузка аватарки (multipart, поле "avatar"). */
-  async uploadAvatar(req: Request, res: Response): Promise<void> {
-    const userId = this.userId(req);
-    const file = (req as any).file as Express.Multer.File | undefined;
-    if (!file) throw AppError.badRequest('Файл аватарки обязателен (поле "avatar")');
-
-    const avatarUrl = buildAvatarUrl(userId, file.filename);
-    await User.findByIdAndUpdate(userId, { avatarUrl });
-    success(res, { avatarUrl }, 'Аватарка обновлена');
-  }
-
-  /** DELETE /users/me/avatar — удалить аватарку. */
-  async deleteAvatar(req: Request, res: Response): Promise<void> {
-    const userId = this.userId(req);
-    await User.findByIdAndUpdate(userId, { $unset: { avatarUrl: 1 } });
-    try {
-      await fs.rm(path.join(USER_AVATAR_UPLOAD_ROOT, userId), { recursive: true, force: true });
-    } catch {
-      /* best-effort cleanup */
-    }
-    success(res, { avatarUrl: null }, 'Аватарка удалена');
   }
 
   /** PATCH /users/me/profile-subject-pair — id пары из GET /profile-subject-pairs или null для сброса */
