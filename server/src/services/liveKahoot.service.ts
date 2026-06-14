@@ -56,7 +56,7 @@ interface LiveRoomState {
   test: { questions: IQuestion[] };
   phase: LiveRoomPhase;
   revision: number;
-  participants: Map<string, { displayName: string; ready: boolean; isHost: boolean }>;
+  participants: Map<string, { displayName: string; avatarUrl?: string | null; ready: boolean; isHost: boolean }>;
   currentQuestionIndex: number;
   questionEndAt: number | null;
   questionStartedAt: number;
@@ -65,13 +65,19 @@ interface LiveRoomState {
   questionTimer: ReturnType<typeof setTimeout> | null;
   betweenRoundsTimer: ReturnType<typeof setTimeout> | null;
   finishedTimer: ReturnType<typeof setTimeout> | null;
-  finalLeaderboard: { rank: number; userId: string; displayName: string; totalScore: number }[] | null;
+  finalLeaderboard:
+    | { rank: number; userId: string; displayName: string; avatarUrl?: string | null; totalScore: number }[]
+    | null;
 }
 
-function getDisplayNameForUserId(userId: string): Promise<string> {
+function getDisplayInfoForUserId(userId: string): Promise<{ displayName: string; avatarUrl: string | null }> {
   return User.findById(userId)
+    .select('fullName avatarUrl')
     .lean()
-    .then((u) => (u?.fullName && String(u.fullName).trim() ? String(u.fullName) : 'Игрок'));
+    .then((u) => ({
+      displayName: u?.fullName && String(u.fullName).trim() ? String(u.fullName) : 'Игрок',
+      avatarUrl: (u as { avatarUrl?: string })?.avatarUrl || null
+    }));
 }
 
 function roomChannel(roomId: string): string {
@@ -113,6 +119,7 @@ function buildStatePayload(room: LiveRoomState, forUserId: string): Record<strin
     const base = {
       userId,
       displayName: p.displayName,
+      avatarUrl: p.avatarUrl ?? null,
       isHost: p.isHost,
       ready: p.ready,
       totalScore: room.totalScoreByUser.get(userId) ?? 0
@@ -209,8 +216,13 @@ async function finishGame(room: LiveRoomState): Promise<void> {
   room.phase = 'finished';
   clearRoomTimers(room);
   const scores = [...room.totalScoreByUser.entries()].map(([userId, totalScore]) => {
-    const name = room.participants.get(userId)?.displayName ?? 'Игрок';
-    return { userId, displayName: name, totalScore };
+    const p = room.participants.get(userId);
+    return {
+      userId,
+      displayName: p?.displayName ?? 'Игрок',
+      avatarUrl: p?.avatarUrl ?? null,
+      totalScore
+    };
   });
   scores.sort((a, b) => b.totalScore - a.totalScore);
   room.finalLeaderboard = scores.map((s, i) => ({ rank: i + 1, ...s }));
@@ -305,7 +317,7 @@ export async function createLiveRoom(
     const id = newRoomId();
     const pin = newPin();
     pinToRoomId.set(pin, id);
-    const name = await getDisplayNameForUserId(userId);
+    const info = await getDisplayInfoForUserId(userId);
     const room: LiveRoomState = {
       id,
       pin,
@@ -314,7 +326,9 @@ export async function createLiveRoom(
       test: { questions: testDoc.questions as IQuestion[] },
       phase: 'lobby',
       revision: 0,
-      participants: new Map([[userId, { displayName: name, ready: false, isHost: true }]]),
+      participants: new Map([
+        [userId, { displayName: info.displayName, avatarUrl: info.avatarUrl, ready: false, isHost: true }]
+      ]),
       currentQuestionIndex: 0,
       questionEndAt: null,
       questionStartedAt: Date.now(),
@@ -375,16 +389,17 @@ export function tryJoinByPin(
   }
   if (!room.participants.has(userId)) {
     const displayName = 'Игрок';
-    void getDisplayNameForUserId(userId).then((name) => {
+    void getDisplayInfoForUserId(userId).then((info) => {
       const r = rooms.get(roomId);
       if (!r || r.phase !== 'lobby' || !r.participants.has(userId)) return;
       const p = r.participants.get(userId);
       if (p) {
-        p.displayName = name;
+        p.displayName = info.displayName;
+        p.avatarUrl = info.avatarUrl;
         bumpAndEmit(r);
       }
     });
-    room.participants.set(userId, { displayName, ready: false, isHost: false });
+    room.participants.set(userId, { displayName, avatarUrl: null, ready: false, isHost: false });
     room.totalScoreByUser.set(userId, 0);
     userRoom.set(userId, roomId);
     bumpAndEmit(room);

@@ -46,3 +46,28 @@ export async function assertLearnerSubjectAccess(userId: string, subjectId: stri
     throw AppError.forbidden('Этот профильный предмет недоступен для вашей выбранной пары');
   }
 }
+
+/**
+ * Все предметы, «отведённые» пользователю: все main-предметы (обязательные) + 2 предмета
+ * выбранной профильной пары (если выбрана). Та же логика доступа, что и в assertLearnerSubjectAccess.
+ */
+export async function getLearnerSubjectIds(userId: string): Promise<string[]> {
+  const user = await User.findById(userId)
+    .select('profileSubjectPairId')
+    .populate({ path: 'profileSubjectPairId', select: 'subject1Id subject2Id' })
+    .lean();
+
+  const mainSubjects = await Subject.find({ subjectKind: { $ne: 'profile' } }).select('_id').lean();
+  const ids = mainSubjects.map((s) => String(s._id));
+
+  const pair = user?.profileSubjectPairId as
+    | { subject1Id?: unknown; subject2Id?: unknown }
+    | null
+    | undefined;
+  if (pair) {
+    if (pair.subject1Id) ids.push(String(pair.subject1Id));
+    if (pair.subject2Id) ids.push(String(pair.subject2Id));
+  }
+
+  return [...new Set(ids)];
+}

@@ -45,8 +45,20 @@ export const API_PATHS = {
   },
   USERS: {
     ME: `${ROUTES.USERS}/me`,
+    ME_AVATAR: `${ROUTES.USERS}/me/avatar`,
+    ME_PROFILE_STATS: `${ROUTES.USERS}/me/profile-stats`,
     ME_TESTS: `${ROUTES.USERS}/me/tests`,
     ME_STATS: `${ROUTES.USERS}/me/stats`,
-    ME_TEST_DETAILS: `${ROUTES.USERS}/me/tests/:testHistoryId`
+    ME_TEST_DETAILS: `${ROUTES.USERS}/me/tests/:testHistoryId`,
+    ME_TEST_RESULT: `${ROUTES.USERS}/me/tests/:testHistoryId/result`,
+    ME_TEST_BREAKDOWN: `${ROUTES.USERS}/me/tests/:testHistoryId/breakdown`,
+    ME_TEST_AI: `${ROUTES.USERS}/me/tests/:testHistoryId/ai-explanation`
+  },
+  ROADMAPS: {
+    NEXT: `${ROUTES.ROADMAPS}/next`,
+    HOME: `${ROUTES.ROADMAPS}/home`
+  },
+  AUTH_EXTRA: {
+    LOGOUT: `${ROUTES.AUTH}/logout`
   }
 } as const;

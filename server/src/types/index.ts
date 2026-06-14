@@ -108,13 +108,16 @@ export interface IAIFeedback {
 
 export interface ITestHistory {
   _id?: Types.ObjectId;
+  /** Ссылка на исходный (кэшируемый, неизменяемый) тест — для ленивого разбора и AI-объяснения */
+  testId?: Types.ObjectId;
   subjectId: Types.ObjectId;
   bookId: Types.ObjectId;
   chapterId?: Types.ObjectId;
   generatedQuestionsHash: string[]; // Хеши вопросов для избежания повторений
   answers: IUserAnswer[];
   result: ITestResult;
-  aiFeedback: IAIFeedback;
+  /** Заполняется лениво при первом запросе GET /users/me/tests/:id/ai-explanation */
+  aiFeedback?: IAIFeedback;
   createdAt?: Date;
 }
 
@@ -126,6 +129,8 @@ export interface IUser {
   phone?: string;
   password?: string;
   googleId?: string;
+  /** URL аватарки пользователя (загруженной или внешней). Денормализуется в лидерборды/кахут. */
+  avatarUrl?: string;
   role: UserRole;
   /** Выбранная пара профильных предметов */
   profileSubjectPairId?: Types.ObjectId;
@@ -217,6 +222,7 @@ export interface IAuthResponse {
     fullName: string;
     userName?: string;
     email?: string;
+    avatarUrl?: string;
     role: UserRole;
   };
 }

@@ -81,8 +81,12 @@ const AIFeedbackSchema = new Schema<IAIFeedback>({
 }, { _id: false });
 
 const TestHistorySchema = new Schema<ITestHistory>({
-  subjectId: { 
-    type: Schema.Types.ObjectId, 
+  testId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Test'
+  },
+  subjectId: {
+    type: Schema.Types.ObjectId,
     ref: 'Subject',
     required: true,
     index: true
@@ -98,13 +102,14 @@ const TestHistorySchema = new Schema<ITestHistory>({
     type: String 
   }],
   answers: [UserAnswerSchema],
-  result: { 
-    type: TestResultSchema, 
-    required: true 
+  result: {
+    type: TestResultSchema,
+    required: true
   },
-  aiFeedback: { 
-    type: AIFeedbackSchema, 
-    required: true 
+  // Заполняется лениво при первом запросе AI-объяснения (GET /users/me/tests/:id/ai-explanation)
+  aiFeedback: {
+    type: AIFeedbackSchema,
+    required: false
   }
 }, { timestamps: true });
 
@@ -152,8 +157,13 @@ const UserSchema = new Schema<IUserDocument>({
     sparse: true,
     unique: true
   },
-  password: { 
-    type: String, 
+  /** URL аватарки (например, /uploads/avatars/<userId>/<file> или внешний URL) */
+  avatarUrl: {
+    type: String,
+    trim: true
+  },
+  password: {
+    type: String,
     minlength: 6,
     select: false
   },

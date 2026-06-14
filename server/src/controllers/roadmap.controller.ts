@@ -54,6 +54,13 @@ class RoadmapController {
     success(res, { subjects: data }, 'Roadmap subject picker');
   }
 
+  /** GET /roadmaps/home — текущая тема + актуальные темы для главной страницы */
+  async getHome(req: Request, res: Response): Promise<void> {
+    const userId = (req as any).user?.userId as string;
+    const data = await roadmapService.getHomeOverview(userId);
+    success(res, data, 'Home overview');
+  }
+
   async postTestSubmitted(req: Request, res: Response): Promise<void> {
     const userId = (req as any).user?.userId as string;
     const { subjectId, nodeId, score, sessionId, submittedAt } = req.body;

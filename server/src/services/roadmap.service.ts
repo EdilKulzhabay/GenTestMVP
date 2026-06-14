@@ -8,6 +8,7 @@ import { roadmapAIService } from './roadmap.ai.service';
 import { assertValidCanonicalNodes } from '../utils/roadmapGraph';
 import { buildKtpCanonicalNodes } from '../utils/roadmapKtp.util';
 import { nodeLessonIds } from './nodeLessonContent.service';
+import { getLearnerSubjectIds } from '../utils/learnerSubjectAccess.util';
 import {
   ICanonicalRoadmapNode,
   ICanonicalRoadmapSourceMeta,
@@ -337,6 +338,7 @@ class RoadmapService {
         metadata: cn.metadata,
         availability,
         mastered: p.mastered,
+        bestScore: p.bestScore ?? 0,
         lowScoreFailCount,
         knowledgeMapTestBlocked:
           lowScoreFailCount >= ROADMAP_MAX_KNOWLEDGE_TEST_FAILS_BEFORE_BLOCK,
@@ -387,7 +389,9 @@ class RoadmapService {
       nextRecommended = {
         nodeId: first.node.nodeId,
         reason: first.reason,
-        priority: first.priority
+        priority: first.priority,
+        topicTitle: first.node.title,
+        subjectName: subject.title
       };
     }
 
@@ -398,9 +402,14 @@ class RoadmapService {
       })
     );
 
+    const masteredTotal = views.filter((n) => n.mastered).length;
+    const progressPercent = views.length ? Math.round((masteredTotal / views.length) * 100) : 0;
+
     const base: {
       version: number;
       subjectId: string;
+      subjectName: string;
+      progressPercent: number;
       nodes: IPersonalRoadmapNodeView[];
       nextRecommended: INextRecommended | null;
       topRecommendations: Array<{
@@ -413,6 +422,8 @@ class RoadmapService {
     } = {
       version: bundle.version,
       subjectId,
+      subjectName: subject.title,
+      progressPercent,
       nodes: views,
       nextRecommended,
       topRecommendations: top.map((t) => ({
@@ -491,10 +502,129 @@ class RoadmapService {
   ) {
     const snap = await this.getPersonalSnapshot(userId, subjectId, options);
     return {
+      subjectId,
+      subjectName: snap.subjectName,
       nextRecommended: snap.nextRecommended,
-      alternatives: snap.topRecommendations.slice(1),
+      // alternatives: добавляем topicTitle (= title узла) и subjectName для отображения без доп. запроса
+      alternatives: snap.topRecommendations.slice(1).map((a) => ({
+        nodeId: a.nodeId,
+        title: a.title,
+        topicTitle: a.title,
+        reason: a.reason,
+        priority: a.priority,
+        subjectName: snap.subjectName
+      })),
       ...(snap.ai ? { ai: snap.ai } : {})
     };
+  }
+
+  /**
+   * Лёгкий подсчёт прогресса по предмету: всего узлов (canonical) и сколько освоено (stored).
+   * Для карточки статистики «темы изучено / всего». Без upsert и AI.
+   */
+  async getProgressCounts(
+    userId: string,
+    subjectId: string
+  ): Promise<{ nodesTotal: number; nodesMastered: number }> {
+    if (!mongoose.isValidObjectId(subjectId)) return { nodesTotal: 0, nodesMastered: 0 };
+    let bundle: CanonicalBundle;
+    try {
+      bundle = await this.resolveCanonical(subjectId);
+    } catch {
+      return { nodesTotal: 0, nodesMastered: 0 };
+    }
+    const canonicalIds = new Set(bundle.nodes.map((n) => n.nodeId));
+    const nodesTotal = canonicalIds.size;
+    if (nodesTotal === 0) return { nodesTotal: 0, nodesMastered: 0 };
+
+    const prog = await UserRoadmapProgress.findOne({ userId, subjectId }).lean();
+    const nodesMastered = (prog?.nodes ?? [])
+      .map((n) => normalizeStoredNodeProgress(n))
+      .filter((n) => n.mastered && canonicalIds.has(n.nodeId)).length;
+
+    return { nodesTotal, nodesMastered };
+  }
+
+  /**
+   * Данные для главной страницы: текущая тема (доступная к прохождению) и актуальные темы
+   * (стоит перепройти) по всем предметам пользователя (main + профильная пара).
+   */
+  async getHomeOverview(userId: string): Promise<{
+    current: Array<{
+      subjectId: string;
+      subjectName: string;
+      nodeId: string;
+      topicTitle: string;
+      progressPercent: number;
+      reason: string;
+    }>;
+    review: Array<{
+      subjectId: string;
+      subjectName: string;
+      nodeId: string;
+      topicTitle: string;
+      bestScore: number;
+      lowScoreFailCount: number;
+    }>;
+  }> {
+    const subjectIds = await getLearnerSubjectIds(userId);
+    const current: Array<{
+      subjectId: string;
+      subjectName: string;
+      nodeId: string;
+      topicTitle: string;
+      progressPercent: number;
+      reason: string;
+    }> = [];
+    const review: Array<{
+      subjectId: string;
+      subjectName: string;
+      nodeId: string;
+      topicTitle: string;
+      bestScore: number;
+      lowScoreFailCount: number;
+    }> = [];
+
+    for (const sid of subjectIds) {
+      let snap;
+      try {
+        snap = await this.getPersonalSnapshot(userId, sid, { includeAiInsights: false });
+      } catch {
+        continue;
+      }
+      const subjectName = snap.subjectName;
+
+      if (snap.nextRecommended) {
+        current.push({
+          subjectId: sid,
+          subjectName,
+          nodeId: snap.nextRecommended.nodeId,
+          topicTitle: snap.nextRecommended.topicTitle ?? '',
+          progressPercent: snap.progressPercent,
+          reason: snap.nextRecommended.reason
+        });
+      }
+
+      // «стоит перепройти»: есть попытки (bestScore>0), но узел слабый (< порога mastery)
+      // ИЛИ были недавние провалы (lowScoreFailCount>0).
+      for (const n of snap.nodes) {
+        const weak = n.bestScore > 0 && n.bestScore < ROADMAP_KNOWLEDGE_TEST_PASS_PERCENT;
+        const failed = (n.lowScoreFailCount ?? 0) > 0;
+        if (weak || failed) {
+          review.push({
+            subjectId: sid,
+            subjectName,
+            nodeId: n.nodeId,
+            topicTitle: n.title,
+            bestScore: n.bestScore,
+            lowScoreFailCount: n.lowScoreFailCount ?? 0
+          });
+        }
+      }
+    }
+
+    review.sort((a, b) => a.bestScore - b.bestScore);
+    return { current, review };
   }
 
   async getPickerSubjects(userId: string): Promise<IRoadmapPickerSubjectItem[]> {

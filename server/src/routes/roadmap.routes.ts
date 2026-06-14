@@ -44,6 +44,15 @@ router.get(
   asyncHandler(roadmapController.getPickerSubjects.bind(roadmapController))
 );
 
+/**
+ * Главная: текущая тема (доступная к прохождению) + актуальные темы (стоит перепройти)
+ * по всем предметам пользователя.
+ */
+router.get(
+  '/home',
+  asyncHandler(roadmapController.getHome.bind(roadmapController))
+);
+
 router.get(
   '/nodes/:nodeId/lesson',
   [

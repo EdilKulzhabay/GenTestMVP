@@ -23,6 +23,24 @@ class AuthController {
     });
   }
 
+  /** Очистить cookie теми же атрибутами, что и при установке, иначе браузер не удалит её. */
+  private clearAuthCookie(req: Request, res: Response): void {
+    const host = req.get('host') || '';
+    const origin = req.headers.origin || (req as any)._oauthFrontendOrigin || '';
+    const isCrossOrigin = !!origin && !origin.includes(host);
+
+    const secure = isCrossOrigin
+      || req.secure
+      || req.headers['x-forwarded-proto'] === 'https'
+      || process.env.NODE_ENV === 'production';
+
+    res.clearCookie('token', {
+      httpOnly: true,
+      sameSite: isCrossOrigin ? 'none' : 'lax',
+      secure
+    });
+  }
+
   private buildAuthResponse(user: any): IAuthResponse {
     const token = generateToken({ userId: user._id!.toString(), role: user.role });
     return {
@@ -32,6 +50,7 @@ class AuthController {
         fullName: user.fullName,
         userName: user.userName,
         email: user.email,
+        avatarUrl: user.avatarUrl,
         role: user.role
       }
     };
@@ -208,8 +227,9 @@ class AuthController {
     if (!req.user) throw AppError.unauthorized('Not authenticated');
 
     const userId = (req as any).user?.userId;
+    // testHistory исключаем — это тяжёлый массив, для него есть отдельные эндпойнты /users/me/tests*
     const user = await User.findById(userId)
-      .select('-password')
+      .select('-password -testHistory')
       .populate({
         path: 'profileSubjectPairId',
         populate: [
@@ -220,6 +240,15 @@ class AuthController {
     if (!user) throw AppError.notFound('User not found');
 
     success(res, user);
+  }
+
+  /**
+   * POST /auth/logout — выход. JWT stateless, поэтому серверной инвалидации нет:
+   * чистим cookie с токеном; клиент дополнительно выбрасывает bearer-токен из памяти.
+   */
+  async logout(req: Request, res: Response): Promise<void> {
+    this.clearAuthCookie(req, res);
+    success(res, null, 'Вы вышли из системы');
   }
 }
 

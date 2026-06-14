@@ -222,6 +222,8 @@ export interface IPersonalRoadmapNodeView {
   availability: RoadmapAvailability;
   /** Освоено (true/false) — единственное отличие персональной карты от canonical */
   mastered: boolean;
+  /** Лучший балл по узлу (0..100) — для прогресса и тем «на повторение» */
+  bestScore: number;
   /** Ссылка на страницу главы (относительный путь приложения) */
   chapterUrl?: string;
   bookId?: string;
@@ -245,4 +247,8 @@ export interface INextRecommended {
   nodeId: string;
   reason: string;
   priority: number;
+  /** Заголовок темы узла — чтобы клиент показал название без доп. запроса */
+  topicTitle?: string;
+  /** Название предмета этого узла */
+  subjectName?: string;
 }

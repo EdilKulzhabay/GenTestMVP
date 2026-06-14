@@ -215,4 +215,9 @@ router.get('/google/callback', (req, res, next) => {
  */
 router.get('/me', authenticate, asyncHandler(authController.getMe.bind(authController)));
 
+/**
+ * POST /auth/logout — выход (очистка cookie с токеном)
+ */
+router.post('/logout', asyncHandler(authController.logout.bind(authController)));
+
 export default router;

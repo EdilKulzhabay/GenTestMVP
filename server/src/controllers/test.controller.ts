@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { createHash } from 'crypto';
 import { Subject, Test, User, SoloAttempt, SoloSession } from '../models';
-import { aiService, roadmapService } from '../services';
+import { aiService, roadmapService, testResultService } from '../services';
 import { resolveBookContentForAI } from '../services/subjectContent.service';
 import {
   IGenerateTestDTO,
@@ -15,7 +15,6 @@ import { success, AppError } from '../utils';
 import {
   formatExpectedAnswer,
   clientPrefillValueForQuestion,
-  getQuestionType,
   gradeAnswer,
   sanitizeQuestionForClient
 } from '../utils/entQuestion.util';
@@ -197,63 +196,6 @@ class TestController {
     };
   }
 
-  /** Построить детальный результат с AI-feedback */
-  private async buildDetailedResult(test: any, userAnswers: IUserAnswer[], resultSummary: any) {
-    const subject = await Subject.findById(test.subjectId);
-    if (!subject) throw AppError.notFound('Subject not found');
-
-    const book = subject.books.find((b) => b._id?.toString() === test.bookId.toString());
-    const chapter = test.chapterId
-      ? book?.chapters.find((c) => c._id?.toString() === test.chapterId!.toString())
-      : undefined;
-
-    const correctAnswersData = test.questions.map((q: any) => {
-      let topicTitle: string | undefined;
-      if (q.relatedContent?.topicId && book) {
-        const topic = chapter
-          ? chapter.topics.find(
-              (t: any) => t._id?.toString() === q.relatedContent.topicId?.toString()
-            )
-          : book.chapters
-              .flatMap((c: any) => c.topics)
-              .find((t: any) => t._id?.toString() === q.relatedContent.topicId?.toString());
-        topicTitle = topic?.title;
-      }
-      return {
-        question: q.questionText,
-        correctSummary: formatExpectedAnswer(q as IQuestion),
-        explanation: q.aiExplanation,
-        relatedContent: { ...q.relatedContent, topicTitle }
-      };
-    });
-
-    const topics = chapter?.topics?.map((t: any) => t.title) ?? [];
-    const aiFeedback = await aiService.analyzeAnswers(correctAnswersData, userAnswers, {
-      subjectTitle: subject.title,
-      bookTitle: book?.title || '',
-      chapterTitle: chapter?.title,
-      topics
-    });
-
-    return {
-      testId: test._id,
-      result: resultSummary,
-      aiFeedback,
-      detailedAnswers: test.questions.map((q: any, i: number) => ({
-        questionType: getQuestionType(q as IQuestion),
-        questionText: q.questionText,
-        options: q.options ?? [],
-        correctOption: formatExpectedAnswer(q as IQuestion),
-        selectedOption: userAnswers[i].selectedOption,
-        isCorrect: userAnswers[i].isCorrect,
-        explanation: q.aiExplanation,
-        relatedContent: q.relatedContent,
-        matchingLeft: q.matchingLeft,
-        matchingRight: q.matchingRight
-      }))
-    };
-  }
-
   /** Узлы КТП ≥ порога (пробник) — для apply-results по персональному роадмапу (фанаут темы книги → КТП) */
   private async trialTopicMasteryPayload(
     forTrial: boolean,
@@ -296,16 +238,24 @@ class TestController {
     success(res, this.sanitize(test), 'Test generated successfully', 201);
   }
 
-  /** POST /tests/submit-guest */
+  /**
+   * POST /tests/submit-guest
+   * Гость не имеет истории — отдаём результат + разбор + темы для повторения сразу (без AI).
+   * AI-объяснение гостю не считаем (дорогой LLM); доступно после авторизации.
+   */
   async submitTestGuest(req: Request, res: Response): Promise<void> {
     const { testId, answers, forTrial }: ISubmitTestDTO = req.body;
     const test = await Test.findById(testId);
     if (!test) throw AppError.notFound('Test not found');
 
     const { userAnswers, result: resultSummary } = this.checkAnswers(test, answers);
-    const detailed = await this.buildDetailedResult(test, userAnswers, resultSummary);
+    const { detailedAnswers, topicsToReview } = await testResultService.buildBreakdown(test, userAnswers);
     const trialExtra = await this.trialTopicMasteryPayload(Boolean(forTrial), test, userAnswers);
-    success(res, { ...detailed, ...trialExtra }, 'Test submitted successfully');
+    success(
+      res,
+      { testId: test._id, result: resultSummary, detailedAnswers, topicsToReview, ...trialExtra },
+      'Test submitted successfully'
+    );
   }
 
   /** POST /tests/generate (auth) */
@@ -341,7 +291,13 @@ class TestController {
     success(res, this.sanitize(test), 'Test generated successfully', 201);
   }
 
-  /** POST /tests/submit (auth) */
+  /**
+   * POST /tests/submit (auth) — ЛЁГКИЙ submit.
+   * Считает только результат и сохраняет историю (без AI). Разбор, темы для повторения и
+   * AI-объяснение клиент тянет лениво по testHistoryId:
+   *   GET /users/me/tests/:id/breakdown        — по-вопросный разбор + темы для повторения
+   *   GET /users/me/tests/:id/ai-explanation   — AI-feedback (считается и кэшируется при первом запросе)
+   */
   async submitTest(req: Request, res: Response): Promise<void> {
     const { testId, answers, roadmapNodeId, roadmapSessionId, forTrial }: ISubmitTestDTO = req.body;
     const userId = (req as any).user?.userId;
@@ -351,21 +307,27 @@ class TestController {
     await assertLearnerSubjectAccess(userId, test.subjectId.toString());
 
     const { userAnswers, result: resultSummary } = this.checkAnswers(test, answers);
-    const detailed = await this.buildDetailedResult(test, userAnswers, resultSummary);
     const trialExtra = await this.trialTopicMasteryPayload(Boolean(forTrial), test, userAnswers);
 
     const questionHashes = test.questions.map((q) => Buffer.from(q.questionText).toString('base64'));
     const testHistory: ITestHistory = {
+      testId: test._id,
       subjectId: test.subjectId,
       bookId: test.bookId,
       chapterId: test.chapterId,
       generatedQuestionsHash: questionHashes,
       answers: userAnswers,
-      result: resultSummary,
-      aiFeedback: detailed.aiFeedback
+      result: resultSummary
+      // aiFeedback не считаем на submit — ленивая генерация в /ai-explanation
     };
 
-    await User.findByIdAndUpdate(userId, { $push: { testHistory } }, { new: true });
+    const updated = await User.findByIdAndUpdate(
+      userId,
+      { $push: { testHistory } },
+      { new: true, select: 'testHistory' }
+    );
+    const savedEntry = updated?.testHistory?.[updated.testHistory.length - 1];
+    const testHistoryId = savedEntry?._id ? String(savedEntry._id) : undefined;
 
     let roadmap: Awaited<ReturnType<typeof roadmapService.recordTestSubmitted>> | undefined;
     if (roadmapNodeId?.trim() && roadmapSessionId?.trim()) {
@@ -385,9 +347,13 @@ class TestController {
 
     success(
       res,
-      roadmap
-        ? { ...detailed, ...trialExtra, roadmap }
-        : { ...detailed, ...trialExtra },
+      {
+        testHistoryId,
+        testId: test._id,
+        result: resultSummary,
+        ...trialExtra,
+        ...(roadmap ? { roadmap } : {})
+      },
       'Test submitted successfully'
     );
   }
@@ -607,7 +573,7 @@ class TestController {
     })
       .sort({ finalScore: -1, createdAt: 1 })
       .limit(10)
-      .populate('userId', 'fullName userName');
+      .populate('userId', 'fullName userName avatarUrl');
 
     const meRow = await SoloAttempt.findOne({
       dailyPackId,
@@ -637,6 +603,7 @@ class TestController {
         rank: index + 1,
         userId: row.userId?._id || row.userId,
         fullName: row.userId?.fullName || row.userId?.userName || 'User',
+        avatarUrl: row.userId?.avatarUrl || null,
         score: row.finalScore
       })),
       me: meRow
@@ -668,22 +635,34 @@ class TestController {
     }
 
     const { userAnswers, result: resultSummary } = this.checkAnswers(test, answers);
-    const detailed = await this.buildDetailedResult(test, userAnswers, resultSummary);
+    const { detailedAnswers, topicsToReview } = await testResultService.buildBreakdown(test, userAnswers);
     const trialExtra = await this.trialTopicMasteryPayload(Boolean(forTrial), test, userAnswers);
 
     const questionHashes = test.questions.map((q) => Buffer.from(q.questionText).toString('base64'));
     const testHistory: ITestHistory = {
+      testId: test._id,
       subjectId: test.subjectId,
       bookId: test.bookId,
       chapterId: test.chapterId,
       generatedQuestionsHash: questionHashes,
       answers: userAnswers,
-      result: resultSummary,
-      aiFeedback: detailed.aiFeedback
+      result: resultSummary
+      // aiFeedback — лениво через /users/me/tests/:id/ai-explanation
     };
 
-    await User.findByIdAndUpdate(userId, { $push: { testHistory } });
-    success(res, { ...detailed, ...trialExtra }, 'Guest test claimed successfully');
+    const updated = await User.findByIdAndUpdate(
+      userId,
+      { $push: { testHistory } },
+      { new: true, select: 'testHistory' }
+    );
+    const savedEntry = updated?.testHistory?.[updated.testHistory.length - 1];
+    const testHistoryId = savedEntry?._id ? String(savedEntry._id) : undefined;
+
+    success(
+      res,
+      { testHistoryId, testId: test._id, result: resultSummary, detailedAnswers, topicsToReview, ...trialExtra },
+      'Guest test claimed successfully'
+    );
   }
 
   /** GET /tests/:id */

@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { param, query } from 'express-validator';
+import { body, param, query } from 'express-validator';
 import { userController } from '../controllers';
-import { authenticate, asyncHandler, validate } from '../middlewares';
+import { authenticate, asyncHandler, validate, userAvatarUpload } from '../middlewares';
 
 /**
  * USER ROUTES
@@ -15,12 +15,56 @@ router.use(authenticate);
 
 /**
  * @route   GET /users/me
- * @desc    Получить информацию о текущем пользователе
+ * @desc    Профиль текущего пользователя (без testHistory)
  * @access  Private
  */
 router.get(
   '/me',
   asyncHandler(userController.getCurrentUser.bind(userController))
+);
+
+/**
+ * @route   PATCH /users/me
+ * @desc    Редактирование профиля (имя, аватарка)
+ * @access  Private
+ */
+router.patch(
+  '/me',
+  [
+    body('fullName')
+      .optional()
+      .isString()
+      .trim()
+      .isLength({ min: 2, max: 100 })
+      .withMessage('fullName must be between 2 and 100 characters'),
+    body('avatarUrl')
+      .optional({ nullable: true })
+      .isString()
+      .withMessage('avatarUrl must be a string or null')
+  ],
+  validate,
+  asyncHandler(userController.updateProfile.bind(userController))
+);
+
+/**
+ * @route   POST /users/me/avatar
+ * @desc    Загрузка аватарки (multipart, поле "avatar")
+ * @access  Private
+ */
+router.post(
+  '/me/avatar',
+  userAvatarUpload.single('avatar'),
+  asyncHandler(userController.uploadAvatar.bind(userController))
+);
+
+/**
+ * @route   DELETE /users/me/avatar
+ * @desc    Удалить аватарку
+ * @access  Private
+ */
+router.delete(
+  '/me/avatar',
+  asyncHandler(userController.deleteAvatar.bind(userController))
 );
 
 router.patch(
@@ -30,7 +74,7 @@ router.patch(
 
 /**
  * @route   GET /users/me/tests
- * @desc    Получить историю тестов текущего пользователя
+ * @desc    История тестов текущего пользователя
  * @access  Private
  */
 router.get(
@@ -59,7 +103,7 @@ router.get(
 
 /**
  * @route   GET /users/me/stats
- * @desc    Получить статистику пользователя
+ * @desc    Агрегаты по истории тестов
  * @access  Private
  */
 router.get(
@@ -68,19 +112,66 @@ router.get(
 );
 
 /**
+ * @route   GET /users/me/profile-stats
+ * @desc    Карточки профиля: стрик, изучено тем, выбрано предметов
+ * @access  Private
+ */
+router.get(
+  '/me/profile-stats',
+  asyncHandler(userController.getProfileStats.bind(userController))
+);
+
+// Валидатор id записи истории — общий для всех под-роутов
+const testHistoryIdValidator = [
+  param('testHistoryId').isMongoId().withMessage('Invalid test history ID')
+];
+
+/**
+ * @route   GET /users/me/tests/:testHistoryId/breakdown
+ * @desc    По-вопросный разбор + темы для повторения
+ * @access  Private
+ */
+router.get(
+  '/me/tests/:testHistoryId/breakdown',
+  testHistoryIdValidator,
+  validate,
+  asyncHandler(userController.getTestBreakdown.bind(userController))
+);
+
+/**
+ * @route   GET /users/me/tests/:testHistoryId/ai-explanation
+ * @desc    AI-объяснение (ленивая генерация + кэш)
+ * @access  Private
+ */
+router.get(
+  '/me/tests/:testHistoryId/ai-explanation',
+  testHistoryIdValidator,
+  validate,
+  asyncHandler(userController.getTestAiExplanation.bind(userController))
+);
+
+/**
+ * @route   GET /users/me/tests/:testHistoryId/result
+ * @desc    Лёгкая сводка результата
+ * @access  Private
+ */
+router.get(
+  '/me/tests/:testHistoryId/result',
+  testHistoryIdValidator,
+  validate,
+  asyncHandler(userController.getTestResult.bind(userController))
+);
+
+/**
  * @route   GET /users/me/tests/:testHistoryId
- * @desc    Получить детальную информацию о конкретном тесте из истории
+ * @desc    Лёгкая сводка результата (алиас /result, обратная совместимость)
  * @access  Private
  */
 router.get(
   '/me/tests/:testHistoryId',
-  [
-    param('testHistoryId')
-      .isMongoId()
-      .withMessage('Invalid test history ID')
-  ],
+  testHistoryIdValidator,
   validate,
-  asyncHandler(userController.getTestHistoryDetails.bind(userController))
+  asyncHandler(userController.getTestResult.bind(userController))
 );
 
 export default router;
