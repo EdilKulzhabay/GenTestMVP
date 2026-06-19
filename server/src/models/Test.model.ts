@@ -61,7 +61,10 @@ const QuestionSchema = new Schema<IQuestion>(
     relatedContent: {
       type: RelatedContentSchema,
       required: true
-    }
+    },
+    /** Банк (Фаза 2/3): id item банка и покрытые KC — для статистики/SR/пер-KC mastery */
+    questionItemId: { type: Schema.Types.ObjectId },
+    knowledgeComponentIds: { type: [String], default: undefined }
   },
   { _id: false }
 );

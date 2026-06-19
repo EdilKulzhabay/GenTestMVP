@@ -180,6 +180,10 @@ export interface IQuestion {
   acceptableAnswers?: string[];
   acceptableKeywords?: string[];
   referenceAnswer?: string;
+  /** Банк (Фаза 2/3): из какого item банка собран вопрос (для статистики/SR) */
+  questionItemId?: Types.ObjectId;
+  /** Банк: KC (подтемы), которые проверяет вопрос — для пер-KC mastery */
+  knowledgeComponentIds?: string[];
 }
 
 export interface ITest {
@@ -190,6 +194,69 @@ export interface ITest {
   questions: IQuestion[];
   sourceContentHash: string; // Для кеширования
   testProfile?: TestGenerationProfile;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+// ==================== QUESTION BANK (Фаза 2) ====================
+
+export type QuestionItemStatus = 'draft' | 'active' | 'retired';
+
+/** Происхождение вопроса (для грунтинга/аудита/анти-галлюцинаций). */
+export interface IQuestionSourceRef {
+  bookId?: Types.ObjectId;
+  chapterId?: Types.ObjectId;
+  topicId?: Types.ObjectId;
+  pages?: number[];
+}
+
+/**
+ * Элемент банка вопросов — переиспользуемый вопрос, привязанный к узлу знания (теме КТП)
+ * и компонентам знания (KC). Тест-инстанс = выборка таких item'ов (а не встроенные копии).
+ */
+export interface IQuestionItem {
+  _id?: Types.ObjectId;
+  subjectId: Types.ObjectId;
+  /** Стабильный id темы КТП (ktpTopicId) — узел знания */
+  knowledgeNodeId: string;
+  /** KC (подтемы), которые проверяет вопрос */
+  knowledgeComponentIds: string[];
+  /** Содержимое вопроса (формат ЕНТ, переиспользуем IQuestion) */
+  question: IQuestion;
+  /** Сложность 1..5 */
+  difficulty: number;
+  status: QuestionItemStatus;
+  sourceRefs: IQuestionSourceRef[];
+  provenance?: {
+    model?: string;
+    promptVersion?: string;
+    generatedAt?: Date;
+    verified?: boolean;
+    verifyReason?: string;
+  };
+  /** Хэш нормализованного текста — дедуп в пределах узла */
+  contentHash: string;
+  qualityStats?: { timesUsed: number; timesCorrect: number };
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+/** Пер-KC mastery (Фаза 3): тонкий сигнал освоения по компонентам знания. */
+export interface IUserKcComponentProgress {
+  kcId: string;
+  bestScore: number; // 0..100
+  attempts: number;
+  mastered: boolean;
+  lastAttemptAt?: Date;
+}
+
+export interface IUserKcMastery {
+  _id?: Types.ObjectId;
+  userId: Types.ObjectId;
+  subjectId: Types.ObjectId;
+  components: IUserKcComponentProgress[];
+  /** Недавно показанные item'ы (для spaced repetition), ограниченный список */
+  recentItemIds: string[];
   createdAt?: Date;
   updatedAt?: Date;
 }

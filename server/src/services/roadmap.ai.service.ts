@@ -364,14 +364,100 @@ class RoadmapAIService {
   }
 
   /**
+   * Предложить компоненты знания (подтемы) для темы КТП.
+   * Грунтинг: только по названию/описанию темы и тексту источников. Куратор потом подтверждает.
+   */
+  async proposeKnowledgeComponents(input: {
+    subjectTitle: string;
+    nodeTitle: string;
+    nodeDescription?: string;
+    sources: Array<{ label: string; text: string }>;
+  }): Promise<Array<{ title: string; description?: string }>> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw AppError.badRequest('OPENAI_API_KEY is not set');
+
+    const MAX_TOTAL = 16000;
+    let used = 0;
+    const blocks: string[] = [];
+    for (const s of input.sources) {
+      if (used >= MAX_TOTAL) break;
+      const remaining = MAX_TOTAL - used;
+      const t = s.text.length > remaining ? `${s.text.slice(0, remaining)}\n[обрезано]` : s.text;
+      used += t.length;
+      blocks.push(`### ${s.label}\n${t}`);
+    }
+    const sourcesBlock = blocks.join('\n\n') || '(источники не заданы — опирайся на название и описание темы)';
+
+    const prompt = [
+      'Ты методист. Разбей учебную тему на 3–7 компонентов знания (подтем) — атомарных проверяемых единиц.',
+      'Требования:',
+      '- Каждый компонент — отдельное умение/понятие, которое можно отдельно проверить тестом.',
+      '- Опирайся ТОЛЬКО на название/описание темы и приведённый текст; не выдумывай разделы, которых нет.',
+      '- Упорядочи от базового к продвинутому. Язык — как у источников/названия темы.',
+      'Верни ТОЛЬКО строгий JSON без Markdown:',
+      '{ "components": [ { "title": "краткое название подтемы", "description": "1 предложение, что проверяем" } ] }',
+      '',
+      `Предмет: ${input.subjectTitle}. Тема: ${input.nodeTitle}.`,
+      input.nodeDescription?.trim() ? `Описание темы: ${input.nodeDescription.trim()}` : '',
+      '',
+      'Источники:',
+      sourcesBlock
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: MODEL,
+        temperature: 0.3,
+        max_tokens: 1200,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: 'Ты методист; делишь тему на атомарные компоненты знания строго по источникам. Ответ — строгий JSON.'
+          },
+          { role: 'user', content: prompt }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('[roadmap AI] propose KC failed', response.status, errText);
+      throw new Error(`OpenAI: ${response.status}`);
+    }
+
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const raw = data.choices?.[0]?.message?.content ?? '';
+    const parsed = parseJsonObject(raw);
+    const list = parsed.components;
+    if (!Array.isArray(list)) throw AppError.badRequest('AI returned invalid shape: components must be an array');
+    return list
+      .map((c: any) => ({
+        title: String(c?.title ?? '').trim(),
+        ...(typeof c?.description === 'string' && c.description.trim()
+          ? { description: c.description.trim() }
+          : {})
+      }))
+      .filter((c) => c.title)
+      .slice(0, 12);
+  }
+
+  /**
    * Консолидация урока узла КТП: из фрагментов учебников разных классов по ОДНОЙ теме
    * собирает один связный дедуплицированный урок (или 2–4, если материала много).
+   * Если переданы knowledgeComponents — модель структурирует урок вокруг них и помечает
+   * каждую секцию полем kcIds (id покрытых KC).
    */
   async consolidateLessonContent(input: {
     subjectTitle: string;
     nodeTitle: string;
     sources: Array<{ label: string; text: string }>;
-  }): Promise<Array<{ title: string; summary?: string; content: string }>> {
+    knowledgeComponents?: Array<{ id: string; title: string }>;
+  }): Promise<Array<{ title: string; summary?: string; content: string; kcIds?: string[] }>> {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) throw AppError.badRequest('OPENAI_API_KEY is not set');
 
@@ -387,21 +473,42 @@ class RoadmapAIService {
     }
     const sourcesBlock = blocks.join('\n\n');
 
+    const kcList = input.knowledgeComponents ?? [];
+    const kcBlock = kcList.length
+      ? [
+          '',
+          'Компоненты знания (подтемы) этой темы — сделай по одной секции урока на КАЖДЫЙ компонент, в этом порядке:',
+          ...kcList.map((k) => `- [${k.id}] ${k.title}`),
+          'В каждой секции укажи kcIds — массив id покрытых компонентов (обычно один).'
+        ].join('\n')
+      : '';
+
+    const lessonShape = kcList.length
+      ? '{ "lessons": [ { "title": "название секции", "summary": "1-2 предложения", "content": "тело в Markdown", "kcIds": ["<id компонента>"] } ] }'
+      : '{ "lessons": [ { "title": "название урока", "summary": "1-2 предложения", "content": "тело урока в Markdown" } ] }';
+
+    const splitRule = kcList.length
+      ? '- Раздели урок на секции строго по компонентам знания выше (одна секция = один компонент).'
+      : '- По умолчанию ОДИН урок. Если материала очень много — раздели на 2–4 последовательных урока по подтемам.';
+
     const prompt = [
       'Ниже — фрагменты учебников разных классов по ОДНОЙ теме. Собери из них единый урок для ученика.',
       'Требования:',
       '- Объедини материал, убери дословные повторы между источниками; сохрани ВСЕ различные факты (ничего важного не теряй).',
       '- Упорядочи изложение от базового к продвинутому.',
       '- Пиши на языке источников. НЕ добавляй фактов, которых нет в источниках. Не упоминай «класс/учебник/источник» в тексте.',
-      '- По умолчанию ОДИН урок. Если материала очень много — раздели на 2–4 последовательных урока по подтемам.',
+      splitRule,
       'Верни ТОЛЬКО строгий JSON без Markdown-обёртки:',
-      '{ "lessons": [ { "title": "название урока", "summary": "1-2 предложения", "content": "тело урока в Markdown" } ] }',
+      lessonShape,
+      kcBlock,
       '',
       `Предмет: ${input.subjectTitle}. Тема: ${input.nodeTitle}.`,
       '',
       'Источники:',
       sourcesBlock
-    ].join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -433,12 +540,19 @@ class RoadmapAIService {
     if (!Array.isArray(lessonsRaw) || lessonsRaw.length === 0) {
       throw AppError.badRequest('AI returned no lessons');
     }
+    const validKcIds = new Set((input.knowledgeComponents ?? []).map((k) => k.id));
     return lessonsRaw
-      .map((l: any) => ({
-        title: String(l?.title ?? '').trim() || input.nodeTitle,
-        ...(typeof l?.summary === 'string' && l.summary.trim() ? { summary: l.summary.trim() } : {}),
-        content: String(l?.content ?? '').trim()
-      }))
+      .map((l: any) => {
+        const kcIds = Array.isArray(l?.kcIds)
+          ? l.kcIds.map(String).filter((id: string) => validKcIds.has(id))
+          : [];
+        return {
+          title: String(l?.title ?? '').trim() || input.nodeTitle,
+          ...(typeof l?.summary === 'string' && l.summary.trim() ? { summary: l.summary.trim() } : {}),
+          content: String(l?.content ?? '').trim(),
+          ...(kcIds.length ? { kcIds } : {})
+        };
+      })
       .filter((l) => l.content);
   }
 }

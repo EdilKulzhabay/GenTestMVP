@@ -9,6 +9,7 @@ import {
 import { getNodeLessons } from '../utils/nodeLessons.util';
 import { extractTopicText } from '../utils/roadmapChapter.util';
 import { roadmapAIService } from './roadmap.ai.service';
+import { knowledgeComponentService } from './knowledgeComponent.service';
 
 type SubjectShape = {
   title?: string;
@@ -47,8 +48,16 @@ function sourcesWithText(
     .filter((x) => x.text.trim());
 }
 
+/**
+ * Версия пайплайна консолидации урока (модель + промпт).
+ * Входит в ключ кэша: апгрейд промпта/модели инвалидирует старые уроки и они перегенерируются.
+ */
+export const LESSON_PIPELINE_VERSION = 'gpt-4o-mini/consolidate-v1';
+
 function computeSourceHash(items: Array<{ topicId: string; text: string }>): string {
-  return createHash('sha256').update(JSON.stringify(items.map((i) => [i.topicId, i.text]))).digest('hex');
+  return createHash('sha256')
+    .update(JSON.stringify({ v: LESSON_PIPELINE_VERSION, items: items.map((i) => [i.topicId, i.text]) }))
+    .digest('hex');
 }
 
 function storedToLessons(row: { lessons?: ICanonicalNodeLesson[] }): ICanonicalNodeLesson[] {
@@ -60,6 +69,7 @@ function storedToLessons(row: { lessons?: ICanonicalNodeLesson[] }): ICanonicalN
       content: l.content,
       contentFormat: l.contentFormat === 'html' ? ('html' as const) : ('markdown' as const),
       ...(l.summary ? { summary: l.summary } : {}),
+      ...(l.knowledgeComponentIds?.length ? { knowledgeComponentIds: l.knowledgeComponentIds } : {}),
       video: null
     }))
     .sort((a, b) => a.order - b.order);
@@ -113,12 +123,18 @@ export async function resolveNodeLessons(
     return getNodeLessons(node); // сырой fallback, не кэшируем
   }
 
-  let consolidated: Array<{ title: string; summary?: string; content: string }>;
+  // Подтверждённые KC темы → консолидация урока секциями по компонентам (если есть).
+  const confirmedKc = await knowledgeComponentService
+    .getConfirmed(subjectId, ktpTopicId)
+    .catch(() => [] as Array<{ id: string; title: string }>);
+
+  let consolidated: Array<{ title: string; summary?: string; content: string; kcIds?: string[] }>;
   try {
     consolidated = await roadmapAIService.consolidateLessonContent({
       subjectTitle: (subject as SubjectShape).title || '',
       nodeTitle: node.title,
-      sources: withText.map((x) => ({ label: x.label, text: x.text }))
+      sources: withText.map((x) => ({ label: x.label, text: x.text })),
+      ...(confirmedKc.length ? { knowledgeComponents: confirmedKc } : {})
     });
   } catch (e) {
     console.warn('[nodeLessonContent] consolidation failed, using raw sources', e);
@@ -132,6 +148,7 @@ export async function resolveNodeLessons(
     content: l.content,
     contentFormat: 'markdown',
     ...(l.summary ? { summary: l.summary } : {}),
+    ...(l.kcIds?.length ? { knowledgeComponentIds: l.kcIds } : {}),
     video: null
   }));
 
@@ -149,7 +166,8 @@ export async function resolveNodeLessons(
           order: l.order,
           content: l.content,
           contentFormat: l.contentFormat,
-          ...(l.summary ? { summary: l.summary } : {})
+          ...(l.summary ? { summary: l.summary } : {}),
+          ...(l.knowledgeComponentIds?.length ? { knowledgeComponentIds: l.knowledgeComponentIds } : {})
         }))
       }
     },
@@ -157,6 +175,26 @@ export async function resolveNodeLessons(
   ).catch((e) => console.warn('[nodeLessonContent] cache write failed', e));
 
   return lessons;
+}
+
+/**
+ * Сохранить summary урока в кэш NodeLessonContent (live-КТП).
+ * Чинит регенерацию summary на каждый просмотр: один раз посчитали — записали в lessons[].summary.
+ * Возвращает true, если документ найден и обновлён.
+ */
+export async function persistNodeLessonSummary(
+  subjectId: string,
+  node: ICanonicalRoadmapNode,
+  lessonId: string,
+  summary: string
+): Promise<boolean> {
+  const ktpTopicId = nodeKtpTopicId(node);
+  if (!ktpTopicId || !summary.trim()) return false;
+  const res = await NodeLessonContent.updateOne(
+    { subjectId, ktpTopicId, 'lessons.lessonId': lessonId },
+    { $set: { 'lessons.$.summary': summary } }
+  );
+  return res.matchedCount > 0;
 }
 
 /** Упорядоченные lessonId узла (кэш, иначе сырой fallback) — для гейтинга/прогресса. */

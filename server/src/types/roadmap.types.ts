@@ -3,6 +3,21 @@ import { Types } from 'mongoose';
 export type RoadmapAvailability = 'locked' | 'available';
 export type RoadmapProgressStatus = 'not_started' | 'in_progress' | 'mastered';
 
+export type KnowledgeComponentStatus = 'proposed' | 'confirmed';
+
+/**
+ * Компонент знания (подтема) — атомарная учебно-проверяемая единица внутри темы КТП.
+ * _id стабилен: на него ссылаются вопросы банка (QuestionItem) и пер-KC mastery.
+ * Жизненный цикл: AI предлагает (proposed) → куратор подтверждает (confirmed).
+ */
+export interface IKnowledgeComponent {
+  _id?: Types.ObjectId;
+  title: string;
+  description?: string;
+  order: number;
+  status: KnowledgeComponentStatus;
+}
+
 /** Тема КТП (встроенная в KtpCatalog). _id — стабильный id для маппинга и nodeId роудмапа. */
 export interface IKtpTopic {
   _id?: Types.ObjectId;
@@ -13,6 +28,8 @@ export interface IKtpTopic {
   code?: string;
   /** Явные пререквизиты (задел; по умолчанию линейный порядок по order) */
   prerequisiteKtpTopicIds?: Types.ObjectId[];
+  /** Компоненты знания (подтемы) этой темы — атом для тестов и mastery (Фаза 1+). */
+  knowledgeComponents?: IKnowledgeComponent[];
 }
 
 /** Справочник КТП по предмету: канонический упорядоченный список тем. */
@@ -54,6 +71,8 @@ export interface ICanonicalNodeLesson {
   summary?: string;
   video?: IRoadmapLessonVideo | null;
   source?: ICanonicalNodeSource;
+  /** Компоненты знания (KC), которые покрывает эта секция урока (Фаза 1+). */
+  knowledgeComponentIds?: string[];
 }
 
 /** Кэш AI-консолидированного контента урока узла КТП (коллекция node_lesson_content). */

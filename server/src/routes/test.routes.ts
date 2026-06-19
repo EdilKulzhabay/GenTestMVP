@@ -151,6 +151,21 @@ router.post(
   asyncHandler(testController.submitTest.bind(testController))
 );
 
+/**
+ * @route   POST /tests/node-bank
+ * @desc    Собрать тест узла КТП из банка вопросов (покрытие KC + переиспользование)
+ * @access  Private (authenticated users)
+ */
+router.post(
+  '/node-bank',
+  [
+    body('subjectId').isMongoId().withMessage('Invalid subject ID'),
+    body('ktpTopicId').isMongoId().withMessage('Invalid ktpTopicId')
+  ],
+  validate,
+  asyncHandler(testController.generateNodeTestFromBank.bind(testController))
+);
+
 router.post(
   '/solo/start',
   [

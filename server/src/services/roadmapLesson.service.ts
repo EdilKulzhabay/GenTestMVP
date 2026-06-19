@@ -11,7 +11,12 @@ import {
   IRoadmapLessonListItem,
   IRoadmapLessonResponse
 } from '../types/roadmap.types';
-import { resolveNodeLessons, nodeLessonIds, describeNodeSources } from './nodeLessonContent.service';
+import {
+  resolveNodeLessons,
+  nodeLessonIds,
+  describeNodeSources,
+  persistNodeLessonSummary
+} from './nodeLessonContent.service';
 import { roadmapAIService } from './roadmap.ai.service';
 import { roadmapService } from './roadmap.service';
 import { AppError } from '../utils';
@@ -139,9 +144,22 @@ class RoadmapLessonService {
         lessonText: contentNormalized
       });
       if (summary) {
-        await persistLessonSummary(subjectId, nodeId, target.lessonId, summary).catch((e) =>
-          console.warn('[roadmapLesson] persist summary failed', e)
-        );
+        // live-КТП: пишем summary в NodeLessonContent (иначе регенерация на каждый просмотр).
+        // Не-live карты (CanonicalRoadmap): fallback-персист в сам документ карты.
+        const persistedToCache = await persistNodeLessonSummary(
+          subjectId,
+          node,
+          target.lessonId,
+          summary
+        ).catch((e) => {
+          console.warn('[roadmapLesson] persist summary (cache) failed', e);
+          return false;
+        });
+        if (!persistedToCache) {
+          await persistLessonSummary(subjectId, nodeId, target.lessonId, summary).catch((e) =>
+            console.warn('[roadmapLesson] persist summary failed', e)
+          );
+        }
       }
     }
 
