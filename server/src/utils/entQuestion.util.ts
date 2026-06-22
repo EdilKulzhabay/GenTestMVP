@@ -407,6 +407,32 @@ export function parseAndValidateEntQuestions(questions: unknown): IQuestion[] {
   return questions.map((q, i) => validateEntQuestion(q, i));
 }
 
+/** Один вопрос обычного теста: single_choice, ровно 4 варианта. Бросает при невалидности. */
+export function validateRegularQuestion(raw: unknown, index: number): IQuestion {
+  const o = raw as Record<string, unknown>;
+  const questionText = String(o.questionText ?? '').trim();
+  assert(questionText.length >= 5, `Вопрос ${index + 1}: слишком короткий questionText`);
+  const options = (o.options as string[])?.map((x) => String(x).trim()).filter(Boolean) ?? [];
+  assert(options.length === 4, `Вопрос ${index + 1}: нужно ровно 4 варианта ответа`);
+  const correctOption = String(o.correctOption ?? '').trim();
+  assert(options.includes(correctOption), `Вопрос ${index + 1}: correctOption должен совпадать с одним из options`);
+  const aiExplanation = pickAiExplanation(o);
+  const rc = (o.relatedContent as Record<string, unknown>) || {};
+  const pages = Array.isArray(rc.pages) ? rc.pages.map((p) => Number(p)).filter((n) => !Number.isNaN(n)) : [];
+  const relatedContent: IRelatedContent = {
+    pages: pages.length ? pages : [1],
+    topicTitle: rc.topicTitle != null ? String(rc.topicTitle) : undefined
+  };
+  return {
+    questionType: 'single_choice',
+    questionText,
+    options,
+    correctOption,
+    aiExplanation,
+    relatedContent
+  };
+}
+
 /** Обычный тест: N× single_choice, ровно 4 варианта (N по запросу, по умолчанию 10) */
 export function parseAndValidateRegularQuestions(questions: unknown, expectedCount = 10): IQuestion[] {
   if (!Array.isArray(questions)) {
@@ -417,28 +443,27 @@ export function parseAndValidateRegularQuestions(questions: unknown, expectedCou
       `Обычный тест: ожидалось ровно ${expectedCount} вопросов, получено ${questions.length}.`
     );
   }
-  return questions.map((raw, index) => {
-    const o = raw as Record<string, unknown>;
-    const questionText = String(o.questionText ?? '').trim();
-    assert(questionText.length >= 5, `Вопрос ${index + 1}: слишком короткий questionText`);
-    const options = (o.options as string[])?.map((x) => String(x).trim()).filter(Boolean) ?? [];
-    assert(options.length === 4, `Вопрос ${index + 1}: нужно ровно 4 варианта ответа`);
-    const correctOption = String(o.correctOption ?? '').trim();
-    assert(options.includes(correctOption), `Вопрос ${index + 1}: correctOption должен совпадать с одним из options`);
-    const aiExplanation = pickAiExplanation(o);
-    const rc = (o.relatedContent as Record<string, unknown>) || {};
-    const pages = Array.isArray(rc.pages) ? rc.pages.map((p) => Number(p)).filter((n) => !Number.isNaN(n)) : [];
-    const relatedContent: IRelatedContent = {
-      pages: pages.length ? pages : [1],
-      topicTitle: rc.topicTitle != null ? String(rc.topicTitle) : undefined
-    };
-    return {
-      questionType: 'single_choice',
-      questionText,
-      options,
-      correctOption,
-      aiExplanation,
-      relatedContent
-    };
+  return questions.map((raw, index) => validateRegularQuestion(raw, index));
+}
+
+/**
+ * Best-effort валидация набора single_choice вопросов (для банка): валидные оставляем,
+ * невалидные молча отбрасываем. Бросает только если не уцелел ни один вопрос.
+ */
+export function parseRegularQuestionsLenient(questions: unknown): IQuestion[] {
+  if (!Array.isArray(questions)) {
+    throw new Error('OpenAI response: поле questions отсутствует или не массив.');
+  }
+  const valid: IQuestion[] = [];
+  questions.forEach((raw, index) => {
+    try {
+      valid.push(validateRegularQuestion(raw, index));
+    } catch (e) {
+      console.warn('[bank] вопрос отброшен при валидации:', (e as Error).message);
+    }
   });
+  if (valid.length === 0) {
+    throw new Error('Ни один вопрос не прошёл валидацию (все отброшены).');
+  }
+  return valid;
 }

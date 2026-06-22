@@ -11,6 +11,7 @@ import {
 import {
   parseAndValidateEntQuestions,
   parseAndValidateRegularQuestions,
+  parseRegularQuestionsLenient,
   summarizeUserAnswer
 } from '../utils/entQuestion.util';
 import { extractFirstJsonObject } from '../utils/jsonExtract.util';
@@ -382,6 +383,7 @@ class AIService {
       '- Опирайся ИСКЛЮЧИТЕЛЬНО на текст источника ниже. НЕ добавляй фактов, которых там нет.',
       '- Каждый вопрос строго в рамках указанной подтемы; правильный ответ однозначно следует из источника.',
       '- questionType: "single_choice"; options: ровно 4 строки; correctOption — дословно одна из options.',
+      '- questionText — законченный вопрос-предложение (не короче 15 символов), без сокращений.',
       '- aiExplanation: 1–2 предложения. relatedContent: { "pages": [числа] } (можно приблизительно).',
       langRule,
       `Формат ответа: один JSON-объект {"questions":[ ... ровно ${count} ... ]} без Markdown.`,
@@ -401,7 +403,8 @@ class AIService {
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
     const arr = pickQuestionsArray(parsed);
     if (!arr) throw new Error('generateKcQuestions: no questions array');
-    const questions = parseAndValidateRegularQuestions(arr, arr.length);
+    // Банк: best-effort — оставляем валидные вопросы, битые отбрасываем (а не валим весь батч).
+    const questions = parseRegularQuestionsLenient(arr);
     for (const q of questions) {
       if (!q.relatedContent?.pages?.length) q.relatedContent = { ...q.relatedContent, pages: [1] };
     }
