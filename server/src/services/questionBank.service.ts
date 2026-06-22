@@ -136,6 +136,7 @@ class QuestionBankService {
 
     let created = 0;
     let rejected = 0;
+    const rejectReasons: string[] = [];
 
     for (const target of targets) {
       let generated: IQuestion[];
@@ -158,6 +159,7 @@ class QuestionBankService {
         const verdict = await aiService.verifyQuestionItem({ question: q, sourceText: resolved.sourceText });
         if (!verdict.ok) {
           rejected++;
+          if (verdict.reason) rejectReasons.push(verdict.reason);
           continue;
         }
         const hash = contentHashOf(q.questionText);
@@ -192,6 +194,11 @@ class QuestionBankService {
           console.warn('[questionBank] insert failed', e);
         }
       }
+    }
+
+    if (rejectReasons.length) {
+      console.warn(`[questionBank] отклонено верификатором: ${rejected}. Примеры причин:`);
+      for (const r of rejectReasons.slice(0, 8)) console.warn('   •', r);
     }
 
     const coverageAfter = await this.coverage(subjectId, ktpTopicId);
