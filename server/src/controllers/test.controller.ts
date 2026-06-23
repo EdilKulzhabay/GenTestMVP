@@ -1,7 +1,13 @@
 import { Request, Response } from 'express';
 import { createHash } from 'crypto';
 import { Subject, Test, User, SoloAttempt, SoloSession } from '../models';
-import { aiService, roadmapService, testResultService } from '../services';
+import {
+  aiService,
+  roadmapService,
+  testResultService,
+  questionBankService,
+  userKcMasteryService
+} from '../services';
 import { resolveBookContentForAI } from '../services/subjectContent.service';
 import {
   IGenerateTestDTO,
@@ -24,9 +30,40 @@ import { computeTrialTopicMasteryRows } from '../utils/trialTopicMastery.util';
 class TestController {
   private static readonly SOLO_QUESTION_TIME_LIMIT_SEC = 15;
 
-  /** Самый новый Test по предмету (без AI), или `null` — тогда вызывать генерацию. */
-  private async findLatestTestBySubject(subjectId: string) {
-    return Test.findOne({ subjectId }).sort({ createdAt: -1 });
+  /**
+   * Точный фильтр кэша теста: предмет + книга + (глава|её отсутствие) + профиль + хэш контента.
+   * Единый для предгенерационного поиска и для findOrCreateTest — чтобы кэш не «расходился».
+   */
+  private buildExactCacheFilter(
+    dto: IGenerateTestDTO,
+    profile: TestGenerationProfile,
+    sourceContentHash: string
+  ): Record<string, unknown> {
+    const filter: Record<string, unknown> = {
+      subjectId: dto.subjectId,
+      bookId: dto.bookId,
+      sourceContentHash
+    };
+    if (dto.chapterId) {
+      filter.chapterId = dto.chapterId;
+    } else {
+      filter.chapterId = { $exists: false };
+    }
+    if (profile === 'regular') {
+      filter.testProfile = 'regular';
+    } else {
+      filter.$or = [{ testProfile: 'ent' }, { testProfile: { $exists: false } }];
+    }
+    return filter;
+  }
+
+  /** Найти кэшированный тест по точному ключу (тот же контент → тот же тест). */
+  private async findCachedTest(
+    dto: IGenerateTestDTO,
+    profile: TestGenerationProfile,
+    sourceContentHash: string
+  ) {
+    return Test.findOne(this.buildExactCacheFilter(dto, profile, sourceContentHash)).sort({ createdAt: -1 });
   }
 
   private buildDailyPackId(input: {
@@ -103,8 +140,12 @@ class TestController {
     return dto.testProfile === 'regular' ? 'regular' : 'ent';
   }
 
-  /** Создать или найти кэш теста */
-  private async findOrCreateTest(dto: IGenerateTestDTO, generatedTest: any) {
+  /**
+   * Создать или найти кэш теста по точному ключу.
+   * Кэш работает ВСЕГДА (раньше отключался при наличии OPENAI_API_KEY → плодились дубликаты).
+   * allowReuse=false — для пробника (forTrial): всегда свежий тест.
+   */
+  private async findOrCreateTest(dto: IGenerateTestDTO, generatedTest: any, allowReuse = true) {
     if (dto.chapterId) {
       generatedTest.questions = generatedTest.questions.map((q: any) => ({
         ...q,
@@ -114,24 +155,8 @@ class TestController {
 
     const testProfile = this.normalizeTestProfile(dto);
 
-    const useCache = !process.env.OPENAI_API_KEY;
-    if (useCache) {
-      const cacheFilter: Record<string, unknown> = {
-        subjectId: dto.subjectId,
-        bookId: dto.bookId,
-        sourceContentHash: generatedTest.sourceContentHash
-      };
-      if (dto.chapterId) {
-        cacheFilter.chapterId = dto.chapterId;
-      } else {
-        cacheFilter.chapterId = { $exists: false };
-      }
-      if (testProfile === 'regular') {
-        cacheFilter.testProfile = 'regular';
-      } else {
-        cacheFilter.$or = [{ testProfile: 'ent' }, { testProfile: { $exists: false } }];
-      }
-      const cached = await Test.findOne(cacheFilter).sort({ createdAt: -1 });
+    if (allowReuse) {
+      const cached = await this.findCachedTest(dto, testProfile, generatedTest.sourceContentHash);
       if (cached) return cached;
     }
 
@@ -215,26 +240,26 @@ class TestController {
   /** POST /tests/generate-guest */
   async generateTestGuest(req: Request, res: Response): Promise<void> {
     const dto: IGenerateTestDTO = req.body;
+    const profile = this.normalizeTestProfile(dto);
+    const { contentForAI, book } = await resolveBookContentForAI(dto);
+
+    // Точный кэш по контенту: тот же материал → тот же тест (без лишнего LLM-вызова).
     if (!dto.forTrial) {
-      const cached = await this.findLatestTestBySubject(dto.subjectId);
+      const hash = aiService.computeTestContentHash(contentForAI.text, profile, dto.questionCount);
+      const cached = await this.findCachedTest(dto, profile, hash);
       if (cached) {
-        success(res, this.sanitize(cached), 'Test loaded from last saved (same subject)', 201);
+        success(res, this.sanitize(cached), 'Test loaded from cache (same content)', 201);
         return;
       }
     }
-    const { contentForAI, book } = await resolveBookContentForAI(dto);
+
     const genOpts =
       typeof dto.questionCount === 'number' && dto.questionCount > 0
         ? { questionCount: dto.questionCount }
         : undefined;
-    const generated = await aiService.generateTest(
-      contentForAI,
-      [],
-      this.normalizeTestProfile(dto),
-      genOpts
-    );
+    const generated = await aiService.generateTest(contentForAI, [], profile, genOpts);
     this.resolveTopicTitleToId(generated, book);
-    const test = await this.findOrCreateTest(dto, generated);
+    const test = await this.findOrCreateTest(dto, generated, !dto.forTrial);
     success(res, this.sanitize(test), 'Test generated successfully', 201);
   }
 
@@ -264,14 +289,18 @@ class TestController {
     const userId = (req as any).user?.userId;
     await assertLearnerSubjectAccess(userId, dto.subjectId);
     await roadmapService.assertKnowledgeMapTestAllowed(userId, dto.subjectId, dto.roadmapNodeId);
+    const profile = this.normalizeTestProfile(dto);
+    const { contentForAI, book } = await resolveBookContentForAI(dto);
+
+    // Точный кэш по контенту: тот же материал → тот же тест (без лишнего LLM-вызова).
     if (!dto.forTrial) {
-      const cached = await this.findLatestTestBySubject(dto.subjectId);
+      const hash = aiService.computeTestContentHash(contentForAI.text, profile, dto.questionCount);
+      const cached = await this.findCachedTest(dto, profile, hash);
       if (cached) {
-        success(res, this.sanitize(cached), 'Test loaded from last saved (same subject)', 201);
+        success(res, this.sanitize(cached), 'Test loaded from cache (same content)', 201);
         return;
       }
     }
-    const { contentForAI, book } = await resolveBookContentForAI(dto);
 
     const user = await User.findById(userId);
     const previousQuestions = user?.getAllQuestionHashes(dto.subjectId, dto.bookId) || [];
@@ -280,14 +309,9 @@ class TestController {
       typeof dto.questionCount === 'number' && dto.questionCount > 0
         ? { questionCount: dto.questionCount }
         : undefined;
-    const generated = await aiService.generateTest(
-      contentForAI,
-      previousQuestions,
-      this.normalizeTestProfile(dto),
-      genOpts
-    );
+    const generated = await aiService.generateTest(contentForAI, previousQuestions, profile, genOpts);
     this.resolveTopicTitleToId(generated, book);
-    const test = await this.findOrCreateTest(dto, generated);
+    const test = await this.findOrCreateTest(dto, generated, !dto.forTrial);
     success(res, this.sanitize(test), 'Test generated successfully', 201);
   }
 
@@ -308,6 +332,18 @@ class TestController {
 
     const { userAnswers, result: resultSummary } = this.checkAnswers(test, answers);
     const trialExtra = await this.trialTopicMasteryPayload(Boolean(forTrial), test, userAnswers);
+
+    // Пер-KC mastery + статистика банка (только для тестов с KC-тегами; иначе no-op).
+    try {
+      await userKcMasteryService.recordFromSubmission(
+        userId,
+        test.subjectId.toString(),
+        test.questions as IQuestion[],
+        userAnswers
+      );
+    } catch (err) {
+      console.error('[submitTest] KC mastery update failed:', err);
+    }
 
     const questionHashes = test.questions.map((q) => Buffer.from(q.questionText).toString('base64'));
     const testHistory: ITestHistory = {
@@ -356,6 +392,23 @@ class TestController {
       },
       'Test submitted successfully'
     );
+  }
+
+  /**
+   * POST /tests/node-bank (auth) — собрать тест узла из банка вопросов (Фаза 2).
+   * Покрытие KC + переиспользование item'ов; при нехватке банк дозаполняется и пересобирается.
+   */
+  async generateNodeTestFromBank(req: Request, res: Response): Promise<void> {
+    const userId = (req as any).user?.userId;
+    const { subjectId, ktpTopicId, size } = req.body as {
+      subjectId: string;
+      ktpTopicId: string;
+      size?: number;
+    };
+    await assertLearnerSubjectAccess(userId, subjectId);
+    await roadmapService.assertKnowledgeMapTestAllowed(userId, subjectId, `ktp:${ktpTopicId}`);
+    const test = await questionBankService.assembleNodeTest(subjectId, ktpTopicId, { userId, ...(size != null ? { size } : {}) });
+    success(res, this.sanitize(test), 'Test assembled from question bank', 201);
   }
 
   /** POST /tests/solo/start (auth) */
@@ -637,6 +690,17 @@ class TestController {
     const { userAnswers, result: resultSummary } = this.checkAnswers(test, answers);
     const { detailedAnswers, topicsToReview } = await testResultService.buildBreakdown(test, userAnswers);
     const trialExtra = await this.trialTopicMasteryPayload(Boolean(forTrial), test, userAnswers);
+
+    try {
+      await userKcMasteryService.recordFromSubmission(
+        userId,
+        test.subjectId.toString(),
+        test.questions as IQuestion[],
+        userAnswers
+      );
+    } catch (err) {
+      console.error('[claimGuestTest] KC mastery update failed:', err);
+    }
 
     const questionHashes = test.questions.map((q) => Buffer.from(q.questionText).toString('base64'));
     const testHistory: ITestHistory = {

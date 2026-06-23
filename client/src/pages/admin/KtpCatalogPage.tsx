@@ -7,6 +7,7 @@ import { Loader } from '../../components/ui/Loader';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
 import { SuccessMessage } from '../../components/ui/SuccessMessage';
 import { Button } from '../../components/ui/Button';
+import { TopicKnowledgeBank } from '../../components/ktp/TopicKnowledgeBank';
 import { getApiErrorMessage } from '../../utils/error';
 
 /* ───── inline-edit pieces (в стиле SubjectDetailPage) ───── */
@@ -409,6 +410,8 @@ export const KtpCatalogPage: React.FC = () => {
                     await guard(() => ktpApi.updateTopic(sid, t._id, { description: v }), 'Описание обновлено');
                   }}
                 />
+
+                <TopicKnowledgeBank subjectId={sid} topicId={t._id} />
               </div>
 
               <ConfirmDeleteBtn

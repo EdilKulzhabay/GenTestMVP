@@ -33,7 +33,24 @@ router.post(
     body('testProfile')
       .optional()
       .isIn(['regular', 'ent'])
-      .withMessage('testProfile must be regular or ent')
+      .withMessage('testProfile must be regular or ent'),
+    body('questionCount')
+      .optional()
+      .isInt({ min: 1, max: 120 })
+      .withMessage('questionCount must be 1..120')
+      .bail()
+      .custom((value, { req }) => {
+        const qc = Number(value);
+        const ent = req.body?.testProfile !== 'regular'; // дефолтный профиль — ent
+        if (ent) {
+          if (qc < 10 || qc > 120 || qc % 10 !== 0) {
+            throw new Error('Для ЕНТ questionCount должен быть 10..120 и кратен 10');
+          }
+        } else if (qc < 1 || qc > 50) {
+          throw new Error('Для обычного теста questionCount должен быть 1..50');
+        }
+        return true;
+      })
   ],
   validate,
   asyncHandler(testController.generateTestGuest.bind(testController))
@@ -116,7 +133,24 @@ router.post(
     body('testProfile')
       .optional()
       .isIn(['regular', 'ent'])
-      .withMessage('testProfile must be regular or ent')
+      .withMessage('testProfile must be regular or ent'),
+    body('questionCount')
+      .optional()
+      .isInt({ min: 1, max: 120 })
+      .withMessage('questionCount must be 1..120')
+      .bail()
+      .custom((value, { req }) => {
+        const qc = Number(value);
+        const ent = req.body?.testProfile !== 'regular'; // дефолтный профиль — ent
+        if (ent) {
+          if (qc < 10 || qc > 120 || qc % 10 !== 0) {
+            throw new Error('Для ЕНТ questionCount должен быть 10..120 и кратен 10');
+          }
+        } else if (qc < 1 || qc > 50) {
+          throw new Error('Для обычного теста questionCount должен быть 1..50');
+        }
+        return true;
+      })
   ],
   validate,
   asyncHandler(testController.generateTest.bind(testController))
@@ -149,6 +183,22 @@ router.post(
   ],
   validate,
   asyncHandler(testController.submitTest.bind(testController))
+);
+
+/**
+ * @route   POST /tests/node-bank
+ * @desc    Собрать тест узла КТП из банка вопросов (покрытие KC + переиспользование)
+ * @access  Private (authenticated users)
+ */
+router.post(
+  '/node-bank',
+  [
+    body('subjectId').isMongoId().withMessage('Invalid subject ID'),
+    body('ktpTopicId').isMongoId().withMessage('Invalid ktpTopicId'),
+    body('size').optional().isIn([5, 10, 15, 20]).withMessage('size must be one of 5,10,15,20')
+  ],
+  validate,
+  asyncHandler(testController.generateNodeTestFromBank.bind(testController))
 );
 
 router.post(

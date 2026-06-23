@@ -1,5 +1,19 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
-import { IKtpCatalog, IKtpTopic } from '../types/roadmap.types';
+import { IKtpCatalog, IKtpTopic, IKnowledgeComponent } from '../types/roadmap.types';
+
+/**
+ * Компонент знания (подтема) — атом для тестов и mastery. _id стабилен (rename-safe):
+ * на него ссылаются QuestionItem.knowledgeComponentIds и пер-KC прогресс.
+ */
+const KnowledgeComponentSchema = new Schema<IKnowledgeComponent>(
+  {
+    title: { type: String, required: true, trim: true, minlength: 1, maxlength: 300 },
+    description: { type: String, trim: true, maxlength: 2000 },
+    order: { type: Number, required: true, min: 0, default: 0 },
+    status: { type: String, enum: ['proposed', 'confirmed'], default: 'proposed' }
+  },
+  { _id: true, timestamps: false }
+);
 
 /**
  * KTP CATALOG MODEL
@@ -21,7 +35,9 @@ const KtpTopicSchema = new Schema<IKtpTopic>(
     /** Код темы от центра тестирования (для отображения/импорта; НЕ стабильный id) */
     code: { type: String, trim: true, maxlength: 80 },
     /** Явные пререквизиты (задел; по умолчанию используется линейный порядок по `order`) */
-    prerequisiteKtpTopicIds: [{ type: Schema.Types.ObjectId }]
+    prerequisiteKtpTopicIds: [{ type: Schema.Types.ObjectId }],
+    /** Компоненты знания (подтемы) — атом для тестов и mastery */
+    knowledgeComponents: { type: [KnowledgeComponentSchema], default: undefined }
   },
   { _id: true, timestamps: false }
 );

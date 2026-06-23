@@ -11,9 +11,11 @@ import {
 import {
   parseAndValidateEntQuestions,
   parseAndValidateRegularQuestions,
+  parseRegularQuestionsLenient,
   summarizeUserAnswer
 } from '../utils/entQuestion.util';
 import { extractFirstJsonObject } from '../utils/jsonExtract.util';
+import { AppError } from '../utils';
 
 function pickQuestionsArray(parsed: Record<string, unknown>): unknown[] | null {
   const q = parsed.questions;
@@ -71,11 +73,11 @@ class AIService {
     const profile: TestGenerationProfile = testProfile === 'regular' ? 'regular' : 'ent';
     const qc = options?.questionCount;
     if (profile === 'regular' && qc != null && (qc < 1 || qc > 50)) {
-      throw new Error('Обычный тест: укажите от 1 до 50 вопросов.');
+      throw AppError.badRequest('Обычный тест: укажите от 1 до 50 вопросов.');
     }
     if (profile === 'ent' && qc != null) {
       if (qc < 10 || qc > 120 || qc % 10 !== 0) {
-        throw new Error('Формат ЕНТ: от 10 до 120 вопросов, кратно 10.');
+        throw AppError.badRequest('Формат ЕНТ: от 10 до 120 вопросов, кратно 10.');
       }
       if (qc > 10) {
         return this.generateEntBatchedTest(content, _previousQuestions, qc);
@@ -85,9 +87,7 @@ class AIService {
     const expectedN =
       profile === 'regular' ? Math.min(50, Math.max(1, qc ?? 10)) : 10;
 
-    const sourceContentHash = this.hashContent(
-      JSON.stringify({ v: 4, profile, n: expectedN, text: content.text })
-    );
+    const sourceContentHash = this.computeTestContentHash(content.text, profile, qc);
 
     const topicsList = content.metadata.topics?.length
       ? `- relatedContent.topicTitle — точное название темы из списка: [${content.metadata.topics.join(', ')}]. Если вопрос не привязан к конкретной теме, опусти topicTitle.`
@@ -97,11 +97,14 @@ class AIService {
       ? `- Язык полей questionText, всех вариантов/текстов заданий, aiExplanation и topicTitle: ${content.metadata.contentLanguage.trim()}. Не смешивай с другим языком.`
       : '- Язык вопросов, вариантов ответов и пояснений должен совпадать с языком приведённого учебного текста (например текст на казахском — весь вывод на казахском; на русском — на русском; на английском — на английском).';
 
+    const focusN = profile === 'regular' ? expectedN : 10;
     const topicFocusHint = content.metadata.topicFocus?.trim()
-      ? profile === 'regular'
-        ? `- ВАЖНО: Все ${expectedN} вопросов должны быть сфокусированы на теме «${content.metadata.topicFocus.trim()}». Если в контенте недостаточно материала именно по этой теме, генерируй максимально близкие по смыслу вопросы.`
-        : `- ВАЖНО: Все 10 вопросов должны быть сфокусированы на теме «${content.metadata.topicFocus.trim()}». Если в контенте недостаточно материала именно по этой теме, генерируй максимально близкие по смыслу вопросы.`
+      ? `- ВАЖНО: Все ${focusN} вопросов должны быть строго по теме «${content.metadata.topicFocus.trim()}» и опираться ТОЛЬКО на приведённый учебный текст. Если материала по теме мало — сократи охват вопросов, но НЕ добавляй сведения извне.`
       : '';
+
+    // Анти-галлюцинации: жёсткое заземление на источник (применяется всегда).
+    const groundingRule =
+      '- Опирайся ИСКЛЮЧИТЕЛЬНО на приведённый ниже учебный текст. Запрещено добавлять факты, определения, формулы или примеры, которых нет в тексте. Каждый вопрос и его правильный ответ должны однозначно следовать из источника.';
 
     const regularN = expectedN;
     const regularSpec = [
@@ -154,6 +157,7 @@ class AIService {
       specBody,
       '',
       'Требования:',
+      groundingRule,
       languageRule,
       topicFocusHint,
       '',
@@ -345,15 +349,128 @@ class AIService {
         question.relatedContent = { ...question.relatedContent, pages: [1] };
       }
     }
-    const sourceContentHash = this.hashContent(
-      JSON.stringify({ v: 3, profile: 'ent', n: total, text: content.text })
-    );
+    const sourceContentHash = this.computeTestContentHash(content.text, 'ent', total);
     return { questions: all, sourceContentHash };
   }
 
   /**
+   * Банк вопросов: генерация single_choice вопросов строго по одному компоненту знания (KC),
+   * заземлённых на переданный текст источника. Возвращает провалидированные IQuestion.
+   */
+  async generateKcQuestions(input: {
+    nodeTitle: string;
+    kcTitle: string;
+    kcDescription?: string;
+    sourceText: string;
+    language?: string;
+    count: number;
+    difficulty: number;
+  }): Promise<IQuestion[]> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error('OPENAI_API_KEY is not defined.');
+
+    const count = Math.min(10, Math.max(1, input.count));
+    const body = input.sourceText.length > 14000 ? `${input.sourceText.slice(0, 14000)}\n[обрезано]` : input.sourceText;
+    const langRule = input.language?.trim()
+      ? `Язык вопросов/вариантов/пояснений: ${input.language.trim()}.`
+      : 'Язык — как у текста источника.';
+    const diffWord = input.difficulty <= 2 ? 'базовая' : input.difficulty >= 4 ? 'повышенная' : 'средняя';
+
+    const prompt = [
+      `Сгенерируй ровно ${count} проверочных вопросов (single_choice) по ОДНОЙ подтеме.`,
+      `Подтема (компонент знания): «${input.kcTitle}»${input.kcDescription ? ` — ${input.kcDescription}` : ''}.`,
+      `Тема: «${input.nodeTitle}». Сложность: ${diffWord}.`,
+      'Требования:',
+      '- Опирайся ИСКЛЮЧИТЕЛЬНО на текст источника ниже. НЕ добавляй фактов, которых там нет.',
+      '- Каждый вопрос строго в рамках указанной подтемы; правильный ответ однозначно следует из источника.',
+      '- questionType: "single_choice"; options: ровно 4 строки; correctOption — дословно одна из options.',
+      '- questionText — законченный вопрос-предложение (не короче 15 символов), без сокращений.',
+      '- Дистракторы (неверные варианты): правдоподобные, из той же темы/текста, сопоставимой длины и стиля с верным; все 4 варианта различны; ровно один однозначно верный.',
+      '- Запрещены варианты-«ловушки» вида «всё перечисленное», «нет верного ответа», «оба варианта».',
+      '- aiExplanation: 1–2 предложения. relatedContent: { "pages": [числа] } (можно приблизительно).',
+      langRule,
+      `Формат ответа: один JSON-объект {"questions":[ ... ровно ${count} ... ]} без Markdown.`,
+      '',
+      'Текст источника:',
+      body
+    ].join('\n');
+
+    const messages = [
+      { role: 'system' as const, content: 'Ты составляешь тестовые задания строго по переданному фрагменту. Ответ — строгий JSON с ключом questions.' },
+      { role: 'user' as const, content: prompt }
+    ];
+
+    const raw = await this.openAiJsonCompletion(apiKey, messages, Math.min(8000, 1200 + count * 400), 0.4);
+    const jsonStr = extractFirstJsonObject(raw);
+    if (!jsonStr) throw new Error('generateKcQuestions: no JSON in response');
+    const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+    const arr = pickQuestionsArray(parsed);
+    if (!arr) throw new Error('generateKcQuestions: no questions array');
+    // Банк: best-effort — оставляем валидные вопросы, битые отбрасываем (а не валим весь батч).
+    const questions = parseRegularQuestionsLenient(arr);
+    for (const q of questions) {
+      if (!q.relatedContent?.pages?.length) q.relatedContent = { ...q.relatedContent, pages: [1] };
+    }
+    return questions;
+  }
+
+  /**
+   * Верификация вопроса банка (LLM-judge, анти-галлюцинации):
+   * корректен ли заявленный правильный ответ и однозначно ли он следует из источника.
+   */
+  async verifyQuestionItem(input: { question: IQuestion; sourceText: string }): Promise<{ ok: boolean; reason?: string }> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return { ok: true }; // без ключа верификацию не делаем (не блокируем поток)
+
+    const q = input.question;
+    const body = input.sourceText.length > 12000 ? `${input.sourceText.slice(0, 12000)}\n[обрезано]` : input.sourceText;
+    const correct = q.correctOption ?? (q.correctOptions ?? []).join(', ') ?? '';
+    const prompt = [
+      'Проверь тестовый вопрос на ФАКТИЧЕСКУЮ корректность относительно текста источника.',
+      'Верни строгий JSON: { "ok": true|false, "reason": "кратко" }.',
+      'Задача — отсеять только реально плохие вопросы (галлюцинации, неверный ключ). Не придирайся к стилю.',
+      'ok=true, если выполнены ОБА условия:',
+      '  (1) заявленный правильный ответ фактически верен;',
+      '  (2) он не противоречит источнику и не опирается на факты, которых в источнике явно нет.',
+      'ok=false ставь только при ЯВНОЙ проблеме: ключ неверен, либо другой вариант очевидно тоже полностью верен,',
+      'либо ответа в источнике нет вовсе. В сомнительных/пограничных случаях ставь ok=true.',
+      '',
+      `Вопрос: ${q.questionText}`,
+      q.options?.length ? `Варианты: ${q.options.join(' | ')}` : '',
+      `Заявленный правильный ответ: ${correct}`,
+      '',
+      'Текст источника:',
+      body
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    try {
+      const raw = await this.openAiJsonCompletion(
+        apiKey,
+        [
+          { role: 'system', content: 'Ты строгий рецензент тестовых заданий. Отвечай строгим JSON.' },
+          { role: 'user', content: prompt }
+        ],
+        400,
+        0.0
+      );
+      const jsonStr = extractFirstJsonObject(raw);
+      if (!jsonStr) return { ok: false, reason: 'verifier: no JSON' };
+      const parsed = JSON.parse(jsonStr) as { ok?: unknown; reason?: unknown };
+      return {
+        ok: parsed.ok === true,
+        ...(typeof parsed.reason === 'string' ? { reason: parsed.reason } : {})
+      };
+    } catch (e) {
+      console.warn('[AI] verifyQuestionItem failed', e);
+      return { ok: false, reason: 'verifier error' };
+    }
+  }
+
+  /**
    * Анализ ответов пользователя и генерация обратной связи
-   * 
+   *
    * @param test - тест с правильными ответами
    * @param userAnswers - ответы пользователя
    * @param content - контент для ссылок на материал
@@ -481,6 +598,24 @@ class AIService {
     };
 
     return data.choices?.[0]?.message?.content ?? '';
+  }
+
+  /**
+   * Единый хэш контента теста — источник правды для кэша.
+   * ВАЖНО: должен возвращать ровно тот же хэш, что и generateTest/generateEntBatchedTest,
+   * чтобы предгенерационный поиск в кэше совпадал с тем, под которым тест сохранится.
+   */
+  computeTestContentHash(
+    text: string,
+    profile: TestGenerationProfile = 'ent',
+    questionCount?: number
+  ): string {
+    const p: TestGenerationProfile = profile === 'regular' ? 'regular' : 'ent';
+    if (p === 'ent' && questionCount != null && questionCount > 10) {
+      return this.hashContent(JSON.stringify({ v: 3, profile: 'ent', n: questionCount, text }));
+    }
+    const expectedN = p === 'regular' ? Math.min(50, Math.max(1, questionCount ?? 10)) : 10;
+    return this.hashContent(JSON.stringify({ v: 4, profile: p, n: expectedN, text }));
   }
 
   /**

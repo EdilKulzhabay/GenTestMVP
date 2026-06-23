@@ -61,7 +61,10 @@ const QuestionSchema = new Schema<IQuestion>(
     relatedContent: {
       type: RelatedContentSchema,
       required: true
-    }
+    },
+    /** Банк (Фаза 2/3): id item банка и покрытые KC — для статистики/SR/пер-KC mastery */
+    questionItemId: { type: Schema.Types.ObjectId },
+    knowledgeComponentIds: { type: [String], default: undefined }
   },
   { _id: false }
 );
@@ -108,7 +111,8 @@ TestSchema.index({ createdAt: -1 });
 
 TestSchema.path('questions').validate(
   (questions: IQuestion[]) => {
-    if (!Array.isArray(questions) || questions.length !== 10) return false;
+    // Размер теста переменный (regular/ent/банк): валидируем диапазон + корректность каждого вопроса.
+    if (!Array.isArray(questions) || questions.length < 1 || questions.length > 120) return false;
     try {
       questions.forEach((q, i) => {
         validateEntQuestion(q as unknown, i);
@@ -118,7 +122,7 @@ TestSchema.path('questions').validate(
       return false;
     }
   },
-  'Тест должен содержать ровно 10 корректных вопросов в формате ЕНТ'
+  'Тест должен содержать 1–120 корректных вопросов в формате ЕНТ'
 );
 
 TestSchema.statics.findCachedTest = async function (

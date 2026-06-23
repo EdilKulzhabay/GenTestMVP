@@ -833,8 +833,9 @@ class RoadmapService {
     const bestScore = Math.max(cur.bestScore, scorePercent);
     const mastered = cur.mastered || isMasteredByBestScore(bestScore);
     const prevFail = cur.lowScoreFailCount ?? 0;
+    // Освоенный узел НЕ копит fail-счётчик и не блокируется (раньше: mastered при 70%, но fail при <80%).
     const lowScoreFailCount =
-      scorePercent >= ROADMAP_KNOWLEDGE_TEST_PASS_PERCENT
+      mastered || scorePercent >= ROADMAP_KNOWLEDGE_TEST_PASS_PERCENT
         ? 0
         : Math.min(ROADMAP_MAX_KNOWLEDGE_TEST_FAILS_BEFORE_BLOCK, prevFail + 1);
 

@@ -15,7 +15,9 @@ const StoredLessonSchema = new Schema<ICanonicalNodeLesson>(
     order: { type: Number, required: true },
     content: { type: String, required: true },
     contentFormat: { type: String, enum: ['markdown', 'html'], default: 'markdown' },
-    summary: { type: String }
+    summary: { type: String },
+    /** KC (подтемы), которые покрывает эта секция урока */
+    knowledgeComponentIds: { type: [String], default: undefined }
   },
   { _id: false }
 );
