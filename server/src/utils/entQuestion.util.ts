@@ -457,7 +457,13 @@ export function parseRegularQuestionsLenient(questions: unknown): IQuestion[] {
   const valid: IQuestion[] = [];
   questions.forEach((raw, index) => {
     try {
-      valid.push(validateRegularQuestion(raw, index));
+      const q = validateRegularQuestion(raw, index);
+      // Качество банка: 4 варианта должны быть различны (иначе вопрос неполноценный).
+      const opts = (q.options ?? []).map((o) => o.trim().toLowerCase());
+      if (new Set(opts).size !== opts.length) {
+        throw new Error(`Вопрос ${index + 1}: варианты ответа не уникальны`);
+      }
+      valid.push(q);
     } catch (e) {
       console.warn('[bank] вопрос отброшен при валидации:', (e as Error).message);
     }

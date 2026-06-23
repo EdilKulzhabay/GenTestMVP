@@ -17,13 +17,40 @@ import { IUserKcComponentProgress } from '../types';
  * Генерация — только под ПРОБЕЛ покрытия (а не на каждую попытку); сборка теста = выборка item'ов.
  */
 
-const BANK_PROMPT_VERSION = 'gpt-4o-mini/bank-v1';
+const BANK_PROMPT_VERSION = 'gpt-4o-mini/bank-v2';
 const DEFAULT_MIN_ITEMS_PER_KC = 3;
-const TEST_SIZE = 10; // Test-валидатор требует ровно 10 вопросов
+const DEFAULT_TEST_SIZE = 10;
+const ALLOWED_TEST_SIZES = [5, 10, 15, 20];
 
-function contentHashOf(questionText: string): string {
-  const norm = questionText.trim().toLowerCase().replace(/\s+/g, ' ');
-  return createHash('sha256').update(norm).digest('hex');
+function normalizeTestSize(size?: number): number {
+  return size != null && ALLOWED_TEST_SIZES.includes(size) ? size : DEFAULT_TEST_SIZE;
+}
+
+/**
+ * Ключ дедупа item'а: текст + (отсортированные) варианты + правильный ответ.
+ * Включение вариантов ловит перефразировки-с-теми-же-опциями, которые text-only хэш пропускал.
+ */
+function contentHashOf(q: IQuestion): string {
+  const norm = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, ' ');
+  const parts = [
+    norm(q.questionText),
+    ...(q.options ?? []).map(norm).sort(),
+    `=${norm(q.correctOption ?? '')}`
+  ];
+  return createHash('sha256').update(parts.join('|')).digest('hex');
+}
+
+/**
+ * Разложить дефицит на уровни сложности вокруг центра (для разброса в банке —
+ * иначе адаптивному отбору нечем варьировать сложность). Малый дефицит не размазываем.
+ */
+function buildDifficultyPlan(count: number, center: number): Array<{ difficulty: number; count: number }> {
+  if (count <= 0) return [];
+  if (count <= 2) return [{ difficulty: center, count }];
+  const levels = [...new Set([Math.max(1, center - 1), center, Math.min(5, center + 1)])];
+  const plan = levels.map((difficulty) => ({ difficulty, count: 0 }));
+  for (let i = 0; i < count; i++) plan[i % plan.length].count++;
+  return plan.filter((p) => p.count > 0);
 }
 
 type ResolvedNode = {
@@ -140,83 +167,91 @@ class QuestionBankService {
   ): Promise<{ created: number; rejected: number; coverage: Awaited<ReturnType<QuestionBankService['coverage']>> }> {
     await this.assertSubject(subjectId);
     const minPerKc = Math.max(1, opts?.minPerKc ?? DEFAULT_MIN_ITEMS_PER_KC);
-    const difficulty = Math.min(5, Math.max(1, opts?.difficulty ?? 3));
+    const centerDifficulty = Math.min(5, Math.max(1, opts?.difficulty ?? 3));
 
     const resolved = await this.resolveNode(subjectId, ktpTopicId);
     if (!resolved.sourceText.trim()) throw AppError.badRequest('Node has no source text to ground questions');
 
     const kcs = await knowledgeComponentService.getConfirmed(subjectId, ktpTopicId);
-    const cov = await this.coverage(subjectId, ktpTopicId);
-
-    // Список «целей»: либо по KC с дефицитом, либо одна цель на узел (если KC нет).
-    const targets: Array<{ kcId?: string; title: string; deficit: number }> = kcs.length
-      ? cov.perKc
-          .filter((p) => p.active < minPerKc)
-          .map((p) => ({ kcId: p.kcId, title: p.title, deficit: minPerKc - p.active }))
-      : cov.totalActive < minPerKc
-        ? [{ title: resolved.nodeTitle, deficit: minPerKc - cov.totalActive }]
-        : [];
 
     let created = 0;
     let rejected = 0;
     const rejectReasons: string[] = [];
+    const MAX_ROUNDS = 3; // верификатор режет часть — добираем в несколько проходов
 
-    for (const target of targets) {
-      let generated: IQuestion[];
-      try {
-        generated = await aiService.generateKcQuestions({
-          nodeTitle: resolved.nodeTitle,
-          kcTitle: target.title,
-          sourceText: resolved.sourceText,
-          ...(resolved.language ? { language: resolved.language } : {}),
-          count: target.deficit,
-          difficulty
-        });
-      } catch (e) {
-        console.warn('[questionBank] generation failed for', target.title, e);
-        continue;
-      }
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      const cov = await this.coverage(subjectId, ktpTopicId);
+      // Цели: KC с дефицитом активных, либо одна цель на узел (если KC нет).
+      const targets: Array<{ kcId?: string; title: string; deficit: number }> = kcs.length
+        ? cov.perKc
+            .filter((p) => p.active < minPerKc)
+            .map((p) => ({ kcId: p.kcId, title: p.title, deficit: minPerKc - p.active }))
+        : cov.totalActive < minPerKc
+          ? [{ title: resolved.nodeTitle, deficit: minPerKc - cov.totalActive }]
+          : [];
+      if (targets.length === 0) break;
 
-      for (const q of generated) {
-        // Верификация (анти-галлюцинации).
-        const verdict = await aiService.verifyQuestionItem({ question: q, sourceText: resolved.sourceText });
-        if (!verdict.ok) {
-          rejected++;
-          if (verdict.reason) rejectReasons.push(verdict.reason);
-          continue;
-        }
-        const hash = contentHashOf(q.questionText);
-        const doc: Omit<IQuestionItem, '_id' | 'createdAt' | 'updatedAt'> = {
-          subjectId: new mongoose.Types.ObjectId(subjectId),
-          knowledgeNodeId: ktpTopicId,
-          knowledgeComponentIds: target.kcId ? [target.kcId] : [],
-          question: q,
-          difficulty,
-          status: 'active',
-          sourceRefs: resolved.sourceRefs.map((r) => ({
-            ...(r.bookId ? { bookId: new mongoose.Types.ObjectId(r.bookId) } : {}),
-            ...(r.chapterId ? { chapterId: new mongoose.Types.ObjectId(r.chapterId) } : {}),
-            ...(r.topicId ? { topicId: new mongoose.Types.ObjectId(r.topicId) } : {})
-          })),
-          provenance: {
-            model: 'gpt-4o-mini',
-            promptVersion: BANK_PROMPT_VERSION,
-            generatedAt: new Date(),
-            verified: true,
-            ...(verdict.reason ? { verifyReason: verdict.reason } : {})
-          },
-          contentHash: hash,
-          qualityStats: { timesUsed: 0, timesCorrect: 0 }
-        };
-        try {
-          await QuestionItem.create(doc);
-          created++;
-        } catch (e: unknown) {
-          // Дубликат (уникальный индекс по contentHash в узле) — молча пропускаем.
-          if ((e as { code?: number }).code === 11000) continue;
-          console.warn('[questionBank] insert failed', e);
+      let producedThisRound = 0;
+      for (const target of targets) {
+        for (const bucket of buildDifficultyPlan(target.deficit, centerDifficulty)) {
+          let generated: IQuestion[];
+          try {
+            generated = await aiService.generateKcQuestions({
+              nodeTitle: resolved.nodeTitle,
+              kcTitle: target.title,
+              sourceText: resolved.sourceText,
+              ...(resolved.language ? { language: resolved.language } : {}),
+              count: bucket.count,
+              difficulty: bucket.difficulty
+            });
+          } catch (e) {
+            console.warn('[questionBank] generation failed for', target.title, e);
+            continue;
+          }
+
+          for (const q of generated) {
+            // Верификация (анти-галлюцинации).
+            const verdict = await aiService.verifyQuestionItem({ question: q, sourceText: resolved.sourceText });
+            if (!verdict.ok) {
+              rejected++;
+              if (verdict.reason) rejectReasons.push(verdict.reason);
+              continue;
+            }
+            const doc: Omit<IQuestionItem, '_id' | 'createdAt' | 'updatedAt'> = {
+              subjectId: new mongoose.Types.ObjectId(subjectId),
+              knowledgeNodeId: ktpTopicId,
+              knowledgeComponentIds: target.kcId ? [target.kcId] : [],
+              question: q,
+              difficulty: bucket.difficulty,
+              status: 'active',
+              sourceRefs: resolved.sourceRefs.map((r) => ({
+                ...(r.bookId ? { bookId: new mongoose.Types.ObjectId(r.bookId) } : {}),
+                ...(r.chapterId ? { chapterId: new mongoose.Types.ObjectId(r.chapterId) } : {}),
+                ...(r.topicId ? { topicId: new mongoose.Types.ObjectId(r.topicId) } : {})
+              })),
+              provenance: {
+                model: 'gpt-4o-mini',
+                promptVersion: BANK_PROMPT_VERSION,
+                generatedAt: new Date(),
+                verified: true,
+                ...(verdict.reason ? { verifyReason: verdict.reason } : {})
+              },
+              contentHash: contentHashOf(q),
+              qualityStats: { timesUsed: 0, timesCorrect: 0 }
+            };
+            try {
+              await QuestionItem.create(doc);
+              created++;
+              producedThisRound++;
+            } catch (e: unknown) {
+              // Дубликат (уникальный индекс по contentHash в узле) — молча пропускаем.
+              if ((e as { code?: number }).code === 11000) continue;
+              console.warn('[questionBank] insert failed', e);
+            }
+          }
         }
       }
+      if (producedThisRound === 0) break; // прогресса нет — не крутим вхолостую
     }
 
     if (rejectReasons.length) {
@@ -235,11 +270,10 @@ class QuestionBankService {
   async assembleNodeTest(
     subjectId: string,
     ktpTopicId: string,
-    opts?: { userId?: string }
+    opts?: { userId?: string; size?: number }
   ): Promise<InstanceType<typeof Test>> {
     await this.assertSubject(subjectId);
-    // Test-валидатор требует ровно 10 вопросов — размер фиксирован.
-    const size = TEST_SIZE;
+    const size = normalizeTestSize(opts?.size);
 
     // Адаптивный контекст: пер-KC mastery (слабые темы вперёд) + недавние item'ы (SR).
     const ctx = opts?.userId
@@ -251,8 +285,11 @@ class QuestionBankService {
 
     let items = await this.selectCovering(subjectId, ktpTopicId, size, ctx);
     if (items.length < size) {
-      // дозаполняем банк и пробуем ещё раз
-      await this.generateForCoverage(subjectId, ktpTopicId, { minPerKc: DEFAULT_MIN_ITEMS_PER_KC });
+      // дозаполняем банк под нужный размер (минимум на KC масштабируем от size) и пробуем ещё раз
+      const cov = await this.coverage(subjectId, ktpTopicId);
+      const kcCount = Math.max(1, cov.perKc.length);
+      const minPerKc = Math.max(DEFAULT_MIN_ITEMS_PER_KC, Math.ceil(size / kcCount));
+      await this.generateForCoverage(subjectId, ktpTopicId, { minPerKc });
       items = await this.selectCovering(subjectId, ktpTopicId, size, ctx);
     }
     if (items.length < size) {
@@ -266,9 +303,9 @@ class QuestionBankService {
 
     const selected = items.slice(0, size);
     const sourceContentHash =
-      'bank:' +
+      `bank:${size}:` +
       createHash('sha256')
-        .update(selected.map((i) => String(i._id)).sort().join(','))
+        .update(`${size}|` + selected.map((i) => String(i._id)).sort().join(','))
         .digest('hex');
 
     // Реюз: та же выборка → тот же тест.

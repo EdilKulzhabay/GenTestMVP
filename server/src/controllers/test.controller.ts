@@ -400,13 +400,14 @@ class TestController {
    */
   async generateNodeTestFromBank(req: Request, res: Response): Promise<void> {
     const userId = (req as any).user?.userId;
-    const { subjectId, ktpTopicId } = req.body as {
+    const { subjectId, ktpTopicId, size } = req.body as {
       subjectId: string;
       ktpTopicId: string;
+      size?: number;
     };
     await assertLearnerSubjectAccess(userId, subjectId);
     await roadmapService.assertKnowledgeMapTestAllowed(userId, subjectId, `ktp:${ktpTopicId}`);
-    const test = await questionBankService.assembleNodeTest(subjectId, ktpTopicId, { userId });
+    const test = await questionBankService.assembleNodeTest(subjectId, ktpTopicId, { userId, ...(size != null ? { size } : {}) });
     success(res, this.sanitize(test), 'Test assembled from question bank', 201);
   }
 

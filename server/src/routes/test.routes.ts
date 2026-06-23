@@ -33,7 +33,11 @@ router.post(
     body('testProfile')
       .optional()
       .isIn(['regular', 'ent'])
-      .withMessage('testProfile must be regular or ent')
+      .withMessage('testProfile must be regular or ent'),
+    body('questionCount')
+      .optional()
+      .isInt({ min: 1, max: 120 })
+      .withMessage('questionCount must be 1..120')
   ],
   validate,
   asyncHandler(testController.generateTestGuest.bind(testController))
@@ -116,7 +120,11 @@ router.post(
     body('testProfile')
       .optional()
       .isIn(['regular', 'ent'])
-      .withMessage('testProfile must be regular or ent')
+      .withMessage('testProfile must be regular or ent'),
+    body('questionCount')
+      .optional()
+      .isInt({ min: 1, max: 120 })
+      .withMessage('questionCount must be 1..120')
   ],
   validate,
   asyncHandler(testController.generateTest.bind(testController))
@@ -160,7 +168,8 @@ router.post(
   '/node-bank',
   [
     body('subjectId').isMongoId().withMessage('Invalid subject ID'),
-    body('ktpTopicId').isMongoId().withMessage('Invalid ktpTopicId')
+    body('ktpTopicId').isMongoId().withMessage('Invalid ktpTopicId'),
+    body('size').optional().isIn([5, 10, 15, 20]).withMessage('size must be one of 5,10,15,20')
   ],
   validate,
   asyncHandler(testController.generateNodeTestFromBank.bind(testController))
