@@ -106,6 +106,29 @@ class QuestionBankService {
   }
 
   /**
+   * Полный список item'ов банка узла (для admin-просмотра качества) — с правильными ответами.
+   * В отличие от sanitizeQuestionForClient, отдаёт correctOption/пояснения целиком.
+   */
+  async listItems(
+    subjectId: string,
+    ktpTopicId: string,
+    filter?: { kcId?: string; status?: 'draft' | 'active' | 'retired' }
+  ): Promise<IQuestionItem[]> {
+    await this.assertSubject(subjectId);
+    const query: Record<string, unknown> = { subjectId, knowledgeNodeId: ktpTopicId };
+    if (filter?.status) query.status = filter.status;
+    if (filter?.kcId) query.knowledgeComponentIds = filter.kcId;
+    const items = await QuestionItem.find(query).sort({ status: 1, createdAt: -1 }).lean();
+    return items as unknown as IQuestionItem[];
+  }
+
+  // TODO Phase A-next: ручное управление item'ами банка из админки (заложено, не реализовано):
+  //   updateItem(subjectId, ktpTopicId, itemId, patch)   — правка questionText/options/difficulty/KC-тега
+  //   setItemStatus(subjectId, ktpTopicId, itemId, status: 'active'|'retired')  — ретайр/возврат (флип статуса)
+  //   removeItem(subjectId, ktpTopicId, itemId)          — удаление (QuestionItem.deleteOne)
+  // Ретайр/удаление тривиальны; вынесены, чтобы первая итерация UI оставалась read-only.
+
+  /**
    * Дозаполнить банк под покрытие: для каждого KC с дефицитом активных вопросов
    * генерируем недостающие, верифицируем (LLM-judge), дедуплицируем и сохраняем.
    * Если подтверждённых KC нет — генерируем на уровне узла (без KC-тега).

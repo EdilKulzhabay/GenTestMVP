@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { body, param } from 'express-validator';
+import { body, param, query } from 'express-validator';
 import { ktpController } from '../controllers/ktp.controller';
 import { authenticate, isAdmin, isTeacherOrAdmin, asyncHandler, validate } from '../middlewares';
 
@@ -202,5 +202,21 @@ router.post(
   validate,
   asyncHandler(ktpController.bankGenerate.bind(ktpController))
 );
+
+// Просмотр сгенерированных вопросов (с правильными ответами) — только admin.
+router.get(
+  '/:subjectId/topics/:topicId/bank/items',
+  isAdmin,
+  [
+    param('subjectId').isMongoId().withMessage('Invalid subjectId'),
+    param('topicId').isMongoId().withMessage('Invalid КТП topicId'),
+    query('kcId').optional().isMongoId().withMessage('Invalid kcId'),
+    query('status').optional().isIn(['draft', 'active', 'retired'])
+  ],
+  validate,
+  asyncHandler(ktpController.listBankItems.bind(ktpController))
+);
+
+// TODO Phase A-next: PATCH/POST retire/DELETE для /:subjectId/topics/:topicId/bank/items/:itemId
 
 export default router;

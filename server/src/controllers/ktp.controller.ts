@@ -132,6 +132,19 @@ class KtpController {
     const data = await questionBankService.generateForCoverage(subjectId, topicId, { minPerKc, difficulty });
     success(res, data, 'Question bank topped up', 201);
   }
+
+  /** Admin: просмотр сгенерированных вопросов банка узла (с правильными ответами). */
+  async listBankItems(req: Request, res: Response): Promise<void> {
+    const { subjectId, topicId } = req.params;
+    const { kcId, status } = req.query as { kcId?: string; status?: 'draft' | 'active' | 'retired' };
+    const data = await questionBankService.listItems(subjectId, topicId, { kcId, status });
+    success(res, data, 'Question bank items');
+  }
+
+  // TODO Phase A-next: эндпоинты управления item'ами банка (заложено, не реализовано):
+  //   PATCH  /:subjectId/topics/:topicId/bank/items/:itemId       — updateItem
+  //   POST   /:subjectId/topics/:topicId/bank/items/:itemId/retire — setItemStatus
+  //   DELETE /:subjectId/topics/:topicId/bank/items/:itemId       — removeItem
 }
 
 export const ktpController = new KtpController();
