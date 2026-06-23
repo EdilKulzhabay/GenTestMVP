@@ -15,6 +15,7 @@ import {
   summarizeUserAnswer
 } from '../utils/entQuestion.util';
 import { extractFirstJsonObject } from '../utils/jsonExtract.util';
+import { AppError } from '../utils';
 
 function pickQuestionsArray(parsed: Record<string, unknown>): unknown[] | null {
   const q = parsed.questions;
@@ -72,11 +73,11 @@ class AIService {
     const profile: TestGenerationProfile = testProfile === 'regular' ? 'regular' : 'ent';
     const qc = options?.questionCount;
     if (profile === 'regular' && qc != null && (qc < 1 || qc > 50)) {
-      throw new Error('Обычный тест: укажите от 1 до 50 вопросов.');
+      throw AppError.badRequest('Обычный тест: укажите от 1 до 50 вопросов.');
     }
     if (profile === 'ent' && qc != null) {
       if (qc < 10 || qc > 120 || qc % 10 !== 0) {
-        throw new Error('Формат ЕНТ: от 10 до 120 вопросов, кратно 10.');
+        throw AppError.badRequest('Формат ЕНТ: от 10 до 120 вопросов, кратно 10.');
       }
       if (qc > 10) {
         return this.generateEntBatchedTest(content, _previousQuestions, qc);

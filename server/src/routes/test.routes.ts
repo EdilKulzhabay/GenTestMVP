@@ -38,6 +38,19 @@ router.post(
       .optional()
       .isInt({ min: 1, max: 120 })
       .withMessage('questionCount must be 1..120')
+      .bail()
+      .custom((value, { req }) => {
+        const qc = Number(value);
+        const ent = req.body?.testProfile !== 'regular'; // дефолтный профиль — ent
+        if (ent) {
+          if (qc < 10 || qc > 120 || qc % 10 !== 0) {
+            throw new Error('Для ЕНТ questionCount должен быть 10..120 и кратен 10');
+          }
+        } else if (qc < 1 || qc > 50) {
+          throw new Error('Для обычного теста questionCount должен быть 1..50');
+        }
+        return true;
+      })
   ],
   validate,
   asyncHandler(testController.generateTestGuest.bind(testController))
@@ -125,6 +138,19 @@ router.post(
       .optional()
       .isInt({ min: 1, max: 120 })
       .withMessage('questionCount must be 1..120')
+      .bail()
+      .custom((value, { req }) => {
+        const qc = Number(value);
+        const ent = req.body?.testProfile !== 'regular'; // дефолтный профиль — ent
+        if (ent) {
+          if (qc < 10 || qc > 120 || qc % 10 !== 0) {
+            throw new Error('Для ЕНТ questionCount должен быть 10..120 и кратен 10');
+          }
+        } else if (qc < 1 || qc > 50) {
+          throw new Error('Для обычного теста questionCount должен быть 1..50');
+        }
+        return true;
+      })
   ],
   validate,
   asyncHandler(testController.generateTest.bind(testController))

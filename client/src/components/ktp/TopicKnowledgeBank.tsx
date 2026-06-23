@@ -39,6 +39,7 @@ export const TopicKnowledgeBank: React.FC<Props> = ({ subjectId, topicId }) => {
 
   const [addOpen, setAddOpen] = useState(false);
   const [addTitle, setAddTitle] = useState('');
+  const [addingManual, setAddingManual] = useState(false);
 
   const [items, setItems] = useState<BankItem[] | null>(null);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -77,7 +78,7 @@ export const TopicKnowledgeBank: React.FC<Props> = ({ subjectId, topicId }) => {
   const toggle = (): void => {
     const next = !open;
     setOpen(next);
-    if (next && !loaded) void load();
+    if (next && !loaded && !loading) void load();
   };
 
   const runMutation = async (fn: () => Promise<void>): Promise<void> => {
@@ -125,12 +126,17 @@ export const TopicKnowledgeBank: React.FC<Props> = ({ subjectId, topicId }) => {
   const addManual = (): Promise<void> =>
     runMutation(async () => {
       const title = addTitle.trim();
-      if (!title) return;
-      setKcs(await ktpApi.upsertComponent(subjectId, topicId, { title, status: 'confirmed' }));
-      setAddTitle('');
-      setAddOpen(false);
-      await reloadCoverage();
-      flash('Подтема добавлена');
+      if (!title || addingManual) return;
+      setAddingManual(true);
+      try {
+        setKcs(await ktpApi.upsertComponent(subjectId, topicId, { title, status: 'confirmed' }));
+        setAddTitle('');
+        setAddOpen(false);
+        await reloadCoverage();
+        flash('Подтема добавлена');
+      } finally {
+        setAddingManual(false);
+      }
     });
 
   const generate = (): Promise<void> =>
@@ -268,8 +274,12 @@ export const TopicKnowledgeBank: React.FC<Props> = ({ subjectId, topicId }) => {
                     placeholder="Название подтемы"
                     className="w-56 rounded border border-slate-300 px-2 py-1 text-xs focus:border-blue-400 focus:outline-none"
                   />
-                  <button onClick={() => void addManual()} className="text-xs font-medium text-blue-600 hover:underline">
-                    OK
+                  <button
+                    onClick={() => void addManual()}
+                    disabled={addingManual}
+                    className="text-xs font-medium text-blue-600 hover:underline disabled:opacity-50"
+                  >
+                    {addingManual ? '…' : 'OK'}
                   </button>
                   <button onClick={() => setAddOpen(false)} className="text-xs text-slate-400 hover:underline">
                     Отмена

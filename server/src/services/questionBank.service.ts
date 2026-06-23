@@ -40,6 +40,12 @@ function contentHashOf(q: IQuestion): string {
   return createHash('sha256').update(parts.join('|')).digest('hex');
 }
 
+/** Старый (v1) ключ дедупа — только по тексту. Для переходной дедупликации против pre-v2 item'ов. */
+function legacyContentHashOf(questionText: string): string {
+  const norm = questionText.trim().toLowerCase().replace(/\s+/g, ' ');
+  return createHash('sha256').update(norm).digest('hex');
+}
+
 /**
  * Разложить дефицит на уровни сложности вокруг центра (для разброса в банке —
  * иначе адаптивному отбору нечем варьировать сложность). Малый дефицит не размазываем.
@@ -217,6 +223,14 @@ class QuestionBankService {
               if (verdict.reason) rejectReasons.push(verdict.reason);
               continue;
             }
+            const hash = contentHashOf(q);
+            // Переходный дедуп: ловим near-дубли и против старых (v1, text-only) item'ов до бэкфилла.
+            const dup = await QuestionItem.exists({
+              subjectId,
+              knowledgeNodeId: ktpTopicId,
+              contentHash: { $in: [hash, legacyContentHashOf(q.questionText)] }
+            });
+            if (dup) continue;
             const doc: Omit<IQuestionItem, '_id' | 'createdAt' | 'updatedAt'> = {
               subjectId: new mongoose.Types.ObjectId(subjectId),
               knowledgeNodeId: ktpTopicId,
@@ -236,7 +250,7 @@ class QuestionBankService {
                 verified: true,
                 ...(verdict.reason ? { verifyReason: verdict.reason } : {})
               },
-              contentHash: contentHashOf(q),
+              contentHash: hash,
               qualityStats: { timesUsed: 0, timesCorrect: 0 }
             };
             try {
