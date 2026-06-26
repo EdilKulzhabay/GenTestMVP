@@ -284,10 +284,14 @@ class QuestionBankService {
   async assembleNodeTest(
     subjectId: string,
     ktpTopicId: string,
-    opts?: { userId?: string; size?: number }
+    opts?: { userId?: string; size?: number; allowRefill?: boolean }
   ): Promise<InstanceType<typeof Test>> {
     await this.assertSubject(subjectId);
     const size = normalizeTestSize(opts?.size);
+    // По умолчанию при нехватке банк синхронно дозаполняется через LLM (для прогрева куратором).
+    // Студенческий hot-path передаёт allowRefill:false — быстрый 400 при нехватке (клиент уйдёт на LLM-фолбэк),
+    // чтобы не блокировать запрос медленной генерацией банка.
+    const allowRefill = opts?.allowRefill !== false;
 
     // Адаптивный контекст: пер-KC mastery (слабые темы вперёд) + недавние item'ы (SR).
     const ctx = opts?.userId
@@ -298,7 +302,7 @@ class QuestionBankService {
       : undefined;
 
     let items = await this.selectCovering(subjectId, ktpTopicId, size, ctx);
-    if (items.length < size) {
+    if (allowRefill && items.length < size) {
       // дозаполняем банк под нужный размер (минимум на KC масштабируем от size) и пробуем ещё раз
       const cov = await this.coverage(subjectId, ktpTopicId);
       const kcCount = Math.max(1, cov.perKc.length);

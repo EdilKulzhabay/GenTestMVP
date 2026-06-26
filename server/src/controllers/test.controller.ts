@@ -395,8 +395,10 @@ class TestController {
   }
 
   /**
-   * POST /tests/node-bank (auth) — собрать тест узла из банка вопросов (Фаза 2).
-   * Покрытие KC + переиспользование item'ов; при нехватке банк дозаполняется и пересобирается.
+   * POST /tests/node-bank (auth) — собрать тест узла ученика из банка вопросов (Фаза 2).
+   * Покрытие KC + переиспользование item'ов. Студенческий hot-path: allowRefill:false —
+   * при нехватке банка отдаём 400 быстро (без синхронной LLM-догенерации), клиент уходит на LLM-фолбэк.
+   * Прогрев банка делает куратор отдельно через POST /ktp/.../bank/generate.
    */
   async generateNodeTestFromBank(req: Request, res: Response): Promise<void> {
     const userId = (req as any).user?.userId;
@@ -407,7 +409,11 @@ class TestController {
     };
     await assertLearnerSubjectAccess(userId, subjectId);
     await roadmapService.assertKnowledgeMapTestAllowed(userId, subjectId, `ktp:${ktpTopicId}`);
-    const test = await questionBankService.assembleNodeTest(subjectId, ktpTopicId, { userId, ...(size != null ? { size } : {}) });
+    const test = await questionBankService.assembleNodeTest(subjectId, ktpTopicId, {
+      userId,
+      allowRefill: false,
+      ...(size != null ? { size } : {})
+    });
     success(res, this.sanitize(test), 'Test assembled from question bank', 201);
   }
 
