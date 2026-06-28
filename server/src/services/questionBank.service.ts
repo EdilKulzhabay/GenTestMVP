@@ -4,7 +4,8 @@ import { QuestionItem, Test, Subject } from '../models';
 import { KtpCatalog } from '../models/KtpCatalog.model';
 import { AppError } from '../utils';
 import { IKtpCatalog, ICanonicalRoadmapNode } from '../types/roadmap.types';
-import { IQuestion, IQuestionItem } from '../types';
+import { IQuestion, IQuestionItem, EntQuestionType } from '../types';
+import { formatExpectedAnswer } from '../utils/entQuestion.util';
 import { buildKtpCanonicalNodes } from '../utils/roadmapKtp.util';
 import { aiService } from './ai.service';
 import { knowledgeComponentService } from './knowledgeComponent.service';
@@ -17,10 +18,38 @@ import { IUserKcComponentProgress } from '../types';
  * Генерация — только под ПРОБЕЛ покрытия (а не на каждую попытку); сборка теста = выборка item'ов.
  */
 
-const BANK_PROMPT_VERSION = 'gpt-4o-mini/bank-v2';
+const BANK_PROMPT_VERSION = 'gpt-4o-mini/bank-v3';
 const DEFAULT_MIN_ITEMS_PER_KC = 3;
 const DEFAULT_TEST_SIZE = 10;
 const ALLOWED_TEST_SIZES = [5, 10, 15, 20];
+
+/**
+ * Распределение типов вопросов в банке. single_choice преобладает (надёжный грейдинг),
+ * плюс разнообразие. text_input исключён намеренно — нечёткий грейдинг по ключевым словам
+ * даёт нечестный зачёт. Цикл из 10: single×5, multiple×2, short×1, matching_single×1, matching_multiple×1.
+ */
+const BANK_TYPE_CYCLE: EntQuestionType[] = [
+  'single_choice',
+  'multiple_choice',
+  'single_choice',
+  'short_answer',
+  'single_choice',
+  'matching_single',
+  'multiple_choice',
+  'single_choice',
+  'matching_multiple',
+  'single_choice'
+];
+
+/** Микс типов на `count` вопросов, начиная со смещения `offset` (для разнообразия между бакетами). */
+function buildTypeMix(count: number, offset: number): Partial<Record<EntQuestionType, number>> {
+  const mix: Partial<Record<EntQuestionType, number>> = {};
+  for (let i = 0; i < count; i++) {
+    const t = BANK_TYPE_CYCLE[((offset + i) % BANK_TYPE_CYCLE.length + BANK_TYPE_CYCLE.length) % BANK_TYPE_CYCLE.length];
+    mix[t] = (mix[t] ?? 0) + 1;
+  }
+  return mix;
+}
 
 function normalizeTestSize(size?: number): number {
   return size != null && ALLOWED_TEST_SIZES.includes(size) ? size : DEFAULT_TEST_SIZE;
@@ -32,10 +61,13 @@ function normalizeTestSize(size?: number): number {
  */
 function contentHashOf(q: IQuestion): string {
   const norm = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, ' ');
+  // Подпись ответа: для single_choice — correctOption (хеш не меняется vs v2, без churn);
+  // для остальных типов (нет correctOption) — formatExpectedAnswer (matching/multiple/short/text).
+  const answerSig = q.correctOption?.trim() ? norm(q.correctOption) : norm(formatExpectedAnswer(q));
   const parts = [
     norm(q.questionText),
     ...(q.options ?? []).map(norm).sort(),
-    `=${norm(q.correctOption ?? '')}`
+    `=${answerSig}`
   ];
   return createHash('sha256').update(parts.join('|')).digest('hex');
 }
@@ -182,6 +214,7 @@ class QuestionBankService {
 
     let created = 0;
     let rejected = 0;
+    let typeOffset = 0; // сдвигаем микс типов между бакетами/раундами для разнообразия
     const rejectReasons: string[] = [];
     const MAX_ROUNDS = 3; // верификатор режет часть — добираем в несколько проходов
 
@@ -208,12 +241,14 @@ class QuestionBankService {
               sourceText: resolved.sourceText,
               ...(resolved.language ? { language: resolved.language } : {}),
               count: bucket.count,
-              difficulty: bucket.difficulty
+              difficulty: bucket.difficulty,
+              typeMix: buildTypeMix(bucket.count, typeOffset)
             });
           } catch (e) {
             console.warn('[questionBank] generation failed for', target.title, e);
             continue;
           }
+          typeOffset += bucket.count;
 
           for (const q of generated) {
             // Верификация (анти-галлюцинации).

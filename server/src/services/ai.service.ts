@@ -6,16 +6,62 @@ import {
   IContentForAI,
   IUserAnswer,
   IMistake,
-  TestGenerationProfile
+  TestGenerationProfile,
+  EntQuestionType
 } from '../types';
 import {
   parseAndValidateEntQuestions,
   parseAndValidateRegularQuestions,
   parseRegularQuestionsLenient,
+  parseEntQuestionsLenient,
+  formatExpectedAnswer,
   summarizeUserAnswer
 } from '../utils/entQuestion.util';
 import { extractFirstJsonObject } from '../utils/jsonExtract.util';
 import { AppError } from '../utils';
+
+/**
+ * Пер-типовые правила полей для генерации вопросов банка по ОДНОЙ подтеме (KC).
+ * Зеркалят форматы validateEntQuestion. text_input в банк по умолчанию НЕ включаем
+ * (нечёткий грейдинг по ключевым словам → нечестный зачёт), но правило оставлено.
+ */
+const KC_TYPE_RULES: Record<EntQuestionType, string> = {
+  single_choice:
+    'single_choice — ровно 4 различных варианта в "options"; "correctOption" — дословно одна из options (ровно один однозначно верный). Дистракторы правдоподобны, без ловушек («всё перечисленное», «нет верного»).',
+  multiple_choice:
+    'multiple_choice — "options" 4–6 строк; "correctOptions" — массив из 2–3 строк, каждая входит в options; остальные — правдоподобные дистракторы.',
+  matching_single:
+    'matching_single (один-к-одному) — "matchingLeft" и "matchingRight" по 3–4 элемента вида {"id":"L1","text":"..."} (id уникальны внутри колонки); "correctMatching" {"L1":"R2",...} — каждый left id → ровно один right id, правые не повторяются.',
+  matching_multiple:
+    'matching_multiple (один-ко-многим) — "matchingLeft" 2–4, "matchingRight" 4–6 элементов; "correctMatching" {"L1":["R1","R3"],...} — непустые массивы right id из matchingRight.',
+  short_answer:
+    'short_answer — короткий однозначный ответ (число/слово/термин). "acceptableAnswers": массив 1–4 эквивалентных форм (напр. "4","четыре"). Без options.',
+  text_input:
+    'text_input — развёрнутый ответ. Задай проверку: "acceptableKeywords" (3–6 ключевых слов/фраз) или "referenceAnswer" (краткий образцовый ответ). Без options.'
+};
+
+/** Нормализуем запрошенный микс типов к ровному count (по умолчанию — все single_choice). */
+function normalizeKcTypeMix(
+  typeMix: Partial<Record<EntQuestionType, number>> | undefined,
+  count: number
+): Array<{ type: EntQuestionType; n: number }> {
+  const entries = Object.entries(typeMix ?? {})
+    .map(([t, n]) => ({ type: t as EntQuestionType, n: Math.max(0, Math.floor(Number(n) || 0)) }))
+    .filter((e) => e.n > 0);
+  const total = entries.reduce((s, e) => s + e.n, 0);
+  if (total === 0) return [{ type: 'single_choice', n: count }];
+  // подгоняем сумму к count, добавляя/убавляя в крупнейшем бакете
+  let diff = count - total;
+  entries.sort((a, b) => b.n - a.n);
+  while (diff !== 0 && entries.length) {
+    const i = diff > 0 ? 0 : entries.findIndex((e) => e.n > 0);
+    if (i < 0) break;
+    entries[i].n += diff > 0 ? 1 : -1;
+    diff += diff > 0 ? -1 : 1;
+    entries.sort((a, b) => b.n - a.n);
+  }
+  return entries.filter((e) => e.n > 0);
+}
 
 function pickQuestionsArray(parsed: Record<string, unknown>): unknown[] | null {
   const q = parsed.questions;
@@ -354,8 +400,9 @@ class AIService {
   }
 
   /**
-   * Банк вопросов: генерация single_choice вопросов строго по одному компоненту знания (KC),
-   * заземлённых на переданный текст источника. Возвращает провалидированные IQuestion.
+   * Банк вопросов: генерация проверочных вопросов строго по одному компоненту знания (KC),
+   * заземлённых на переданный текст источника. По умолчанию single_choice; если задан typeMix —
+   * генерит смешанные ENT-типы (single/multiple/matching/short/text). Возвращает провалидированные IQuestion.
    */
   async generateKcQuestions(input: {
     nodeTitle: string;
@@ -365,6 +412,7 @@ class AIService {
     language?: string;
     count: number;
     difficulty: number;
+    typeMix?: Partial<Record<EntQuestionType, number>>;
   }): Promise<IQuestion[]> {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) throw new Error('OPENAI_API_KEY is not defined.');
@@ -376,38 +424,60 @@ class AIService {
       : 'Язык — как у текста источника.';
     const diffWord = input.difficulty <= 2 ? 'базовая' : input.difficulty >= 4 ? 'повышенная' : 'средняя';
 
-    const prompt = [
-      `Сгенерируй ровно ${count} проверочных вопросов (single_choice) по ОДНОЙ подтеме.`,
+    const mix = normalizeKcTypeMix(input.typeMix, count);
+    const isMixed = mix.length > 1 || mix[0].type !== 'single_choice';
+
+    const common = [
       `Подтема (компонент знания): «${input.kcTitle}»${input.kcDescription ? ` — ${input.kcDescription}` : ''}.`,
       `Тема: «${input.nodeTitle}». Сложность: ${diffWord}.`,
       'Требования:',
       '- Опирайся ИСКЛЮЧИТЕЛЬНО на текст источника ниже. НЕ добавляй фактов, которых там нет.',
       '- Каждый вопрос строго в рамках указанной подтемы; правильный ответ однозначно следует из источника.',
-      '- questionType: "single_choice"; options: ровно 4 строки; correctOption — дословно одна из options.',
       '- questionText — законченный вопрос-предложение (не короче 15 символов), без сокращений.',
-      '- Дистракторы (неверные варианты): правдоподобные, из той же темы/текста, сопоставимой длины и стиля с верным; все 4 варианта различны; ровно один однозначно верный.',
-      '- Запрещены варианты-«ловушки» вида «всё перечисленное», «нет верного ответа», «оба варианта».',
-      '- aiExplanation: 1–2 предложения. relatedContent: { "pages": [числа] } (можно приблизительно).',
-      langRule,
-      `Формат ответа: один JSON-объект {"questions":[ ... ровно ${count} ... ]} без Markdown.`,
-      '',
-      'Текст источника:',
-      body
-    ].join('\n');
+      '- aiExplanation: 1–2 предложения. relatedContent: { "pages": [числа] } (можно приблизительно).'
+    ];
+
+    const prompt = isMixed
+      ? [
+          `Сгенерируй ровно ${count} проверочных вопросов СМЕШАННЫХ типов по ОДНОЙ подтеме.`,
+          ...common,
+          'Состав по типам (создай ровно столько каждого типа):',
+          ...mix.map((m) => `- ${m.type}: ${m.n}`),
+          '- В каждом вопросе явно укажи "questionType".',
+          'Форматы полей по типам:',
+          ...mix.map((m) => `- ${KC_TYPE_RULES[m.type]}`),
+          langRule,
+          `Формат ответа: один JSON-объект {"questions":[ ... ровно ${count} ... ]} без Markdown.`,
+          '',
+          'Текст источника:',
+          body
+        ].join('\n')
+      : [
+          `Сгенерируй ровно ${count} проверочных вопросов (single_choice) по ОДНОЙ подтеме.`,
+          ...common,
+          '- questionType: "single_choice"; options: ровно 4 строки; correctOption — дословно одна из options.',
+          '- Дистракторы (неверные варианты): правдоподобные, из той же темы/текста, сопоставимой длины и стиля с верным; все 4 варианта различны; ровно один однозначно верный.',
+          '- Запрещены варианты-«ловушки» вида «всё перечисленное», «нет верного ответа», «оба варианта».',
+          langRule,
+          `Формат ответа: один JSON-объект {"questions":[ ... ровно ${count} ... ]} без Markdown.`,
+          '',
+          'Текст источника:',
+          body
+        ].join('\n');
 
     const messages = [
       { role: 'system' as const, content: 'Ты составляешь тестовые задания строго по переданному фрагменту. Ответ — строгий JSON с ключом questions.' },
       { role: 'user' as const, content: prompt }
     ];
 
-    const raw = await this.openAiJsonCompletion(apiKey, messages, Math.min(8000, 1200 + count * 400), 0.4);
+    const raw = await this.openAiJsonCompletion(apiKey, messages, Math.min(8000, 1400 + count * 500), 0.4);
     const jsonStr = extractFirstJsonObject(raw);
     if (!jsonStr) throw new Error('generateKcQuestions: no JSON in response');
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
     const arr = pickQuestionsArray(parsed);
     if (!arr) throw new Error('generateKcQuestions: no questions array');
     // Банк: best-effort — оставляем валидные вопросы, битые отбрасываем (а не валим весь батч).
-    const questions = parseRegularQuestionsLenient(arr);
+    const questions = isMixed ? parseEntQuestionsLenient(arr) : parseRegularQuestionsLenient(arr);
     for (const q of questions) {
       if (!q.relatedContent?.pages?.length) q.relatedContent = { ...q.relatedContent, pages: [1] };
     }
@@ -424,19 +494,27 @@ class AIService {
 
     const q = input.question;
     const body = input.sourceText.length > 12000 ? `${input.sourceText.slice(0, 12000)}\n[обрезано]` : input.sourceText;
-    const correct = q.correctOption ?? (q.correctOptions ?? []).join(', ') ?? '';
+    const correct = formatExpectedAnswer(q) || q.correctOption || '';
+    const matchingCtx =
+      q.matchingLeft?.length && q.matchingRight?.length
+        ? `Левый столбец: ${q.matchingLeft.map((x) => `${x.id}:${x.text}`).join(' | ')}\nПравый столбец: ${q.matchingRight
+            .map((x) => `${x.id}:${x.text}`)
+            .join(' | ')}`
+        : '';
     const prompt = [
       'Проверь тестовый вопрос на ФАКТИЧЕСКУЮ корректность относительно текста источника.',
       'Верни строгий JSON: { "ok": true|false, "reason": "кратко" }.',
-      'Задача — отсеять только реально плохие вопросы (галлюцинации, неверный ключ). Не придирайся к стилю.',
+      'Задача — отсеять только реально плохие вопросы (галлюцинации, неверный ключ). Не придирайся к стилю и типу.',
       'ok=true, если выполнены ОБА условия:',
       '  (1) заявленный правильный ответ фактически верен;',
       '  (2) он не противоречит источнику и не опирается на факты, которых в источнике явно нет.',
       'ok=false ставь только при ЯВНОЙ проблеме: ключ неверен, либо другой вариант очевидно тоже полностью верен,',
       'либо ответа в источнике нет вовсе. В сомнительных/пограничных случаях ставь ok=true.',
       '',
+      `Тип вопроса: ${q.questionType ?? 'single_choice'}`,
       `Вопрос: ${q.questionText}`,
       q.options?.length ? `Варианты: ${q.options.join(' | ')}` : '',
+      matchingCtx,
       `Заявленный правильный ответ: ${correct}`,
       '',
       'Текст источника:',
