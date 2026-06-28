@@ -177,10 +177,17 @@ export function gradeAnswer(question: IQuestion, selectedOption: string): boolea
       if (!userObj) return false;
       const keys = Object.keys(correct);
       if (keys.length !== Object.keys(userObj).length) return false;
+      // Клиент (edu-app) кодирует matching единообразно как {leftId: [rightId]} даже для single,
+      // а ключ хранится как {leftId: "rightId"}. Принимаем обе формы (строка / 1-элементный массив).
+      const asStr = (v: unknown): string | null => {
+        if (typeof v === 'string') return v;
+        if (Array.isArray(v) && v.length === 1 && typeof v[0] === 'string') return v[0];
+        return null;
+      };
       return keys.every((k) => {
-        const cv = correct[k];
-        const uv = userObj[k];
-        return typeof cv === 'string' && typeof uv === 'string' && normText(cv) === normText(uv);
+        const cv = asStr(correct[k]);
+        const uv = asStr(userObj[k]);
+        return cv != null && uv != null && normText(cv) === normText(uv);
       });
     }
     case 'matching_multiple': {
@@ -462,6 +469,37 @@ export function parseRegularQuestionsLenient(questions: unknown): IQuestion[] {
       const opts = (q.options ?? []).map((o) => o.trim().toLowerCase());
       if (new Set(opts).size !== opts.length) {
         throw new Error(`Вопрос ${index + 1}: варианты ответа не уникальны`);
+      }
+      valid.push(q);
+    } catch (e) {
+      console.warn('[bank] вопрос отброшен при валидации:', (e as Error).message);
+    }
+  });
+  if (valid.length === 0) {
+    throw new Error('Ни один вопрос не прошёл валидацию (все отброшены).');
+  }
+  return valid;
+}
+
+/**
+ * Best-effort валидация набора вопросов ЛЮБЫХ ENT-типов (для банка со смешанными типами):
+ * валидные оставляем, невалидные молча отбрасываем. Для choice-типов дополнительно требуем
+ * уникальность вариантов. Бросает только если не уцелел ни один вопрос.
+ */
+export function parseEntQuestionsLenient(questions: unknown): IQuestion[] {
+  if (!Array.isArray(questions)) {
+    throw new Error('OpenAI response: поле questions отсутствует или не массив.');
+  }
+  const valid: IQuestion[] = [];
+  questions.forEach((raw, index) => {
+    try {
+      const q = validateEntQuestion(raw, index);
+      const qt = getQuestionType(q);
+      if (qt === 'single_choice' || qt === 'multiple_choice') {
+        const opts = (q.options ?? []).map((o) => o.trim().toLowerCase());
+        if (new Set(opts).size !== opts.length) {
+          throw new Error(`Вопрос ${index + 1}: варианты ответа не уникальны`);
+        }
       }
       valid.push(q);
     } catch (e) {
