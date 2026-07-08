@@ -407,6 +407,14 @@ export interface IGeneratedTest {
   sourceContentHash: string;
 }
 
+/** Кандидат-ассет для промпта генератора (LLM-B): id + kind + краткая метка. */
+export interface IAssetCandidate {
+  assetId: string;
+  kind: AssetKind;
+  topicTitle?: string;
+  label: string;
+}
+
 export interface IContentForAI {
   text: string;
   metadata: {
@@ -421,6 +429,8 @@ export interface IContentForAI {
     /** Узел roadmap — AI фокусирует вопросы на этой теме */
     topicFocus?: string;
   };
+  /** Ассеты in-scope тем — генератор может сослаться на них через relatedContent.assetIds. */
+  assetCandidates?: IAssetCandidate[];
 }
 
 // ==================== UTILITY TYPES ====================

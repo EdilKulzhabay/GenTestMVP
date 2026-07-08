@@ -1,6 +1,7 @@
 import { Subject } from '../models';
-import { IBook, IContentForAI, IGenerateTestDTO } from '../types';
+import { IAssetCandidate, IBook, IContentAsset, IContentForAI, IGenerateTestDTO } from '../types';
 import { AppError } from '../utils';
+import { collectTestAssets, topicAssetCandidates } from '../utils/roadmapChapter.util';
 
 /**
  * Загрузка текста книги/главы для ИИ (тесты, roadmap и т.д.).
@@ -15,18 +16,20 @@ export async function resolveBookContentForAI(dto: IGenerateTestDTO): Promise<{
   const subject = await Subject.findById(dto.subjectId);
   if (!subject) throw AppError.notFound('Subject not found');
 
-  const book = subject.books.find((b) => b._id?.toString() === dto.bookId);
+  const book = subject.books.find(b => b._id?.toString() === dto.bookId);
   if (!book) throw AppError.notFound('Book not found');
 
   let contentText = '';
   let chapterTitle = '';
   const topics: string[] = [];
+  const assetCandidates: IAssetCandidate[] = [];
   let resolvedChapterId = dto.chapterId;
 
   if (!resolvedChapterId && dto.topicFocus && !dto.fullBook) {
     const focusLower = dto.topicFocus.toLowerCase();
     const matched = book.chapters.find(
-      (ch) => ch.title.toLowerCase().includes(focusLower) || focusLower.includes(ch.title.toLowerCase())
+      ch =>
+        ch.title.toLowerCase().includes(focusLower) || focusLower.includes(ch.title.toLowerCase())
     );
     if (matched) {
       resolvedChapterId = matched._id?.toString();
@@ -36,22 +39,28 @@ export async function resolveBookContentForAI(dto: IGenerateTestDTO): Promise<{
   if (dto.fullBook || !resolvedChapterId) {
     contentText = subject.getBookContent(dto.bookId);
     chapterTitle = 'Вся книга';
-    book.chapters.forEach((ch) => ch.topics.forEach((t) => topics.push(t.title)));
+    book.chapters.forEach(ch =>
+      ch.topics.forEach(t => {
+        topics.push(t.title);
+        assetCandidates.push(...topicAssetCandidates(t.title, t.assets));
+      })
+    );
   } else {
-    const chapter = book.chapters.find((c) => c._id?.toString() === resolvedChapterId);
+    const chapter = book.chapters.find(c => c._id?.toString() === resolvedChapterId);
     if (!chapter) throw AppError.notFound('Chapter not found');
     contentText = subject.getChapterContent(dto.bookId, resolvedChapterId!);
     chapterTitle = chapter.title;
-    chapter.topics.forEach((t) => topics.push(t.title));
+    chapter.topics.forEach(t => {
+      topics.push(t.title);
+      assetCandidates.push(...topicAssetCandidates(t.title, t.assets));
+    });
   }
 
   if (!contentText?.trim()) {
     throw AppError.badRequest('No content available');
   }
 
-  const chapterTitles = [...book.chapters]
-    .sort((a, b) => a.order - b.order)
-    .map((c) => c.title);
+  const chapterTitles = [...book.chapters].sort((a, b) => a.order - b.order).map(c => c.title);
 
   const contentForAI: IContentForAI = {
     text: contentText,
@@ -63,9 +72,26 @@ export async function resolveBookContentForAI(dto: IGenerateTestDTO): Promise<{
       bookAuthor: book.author,
       contentLanguage: book.contentLanguage,
       chapterTitles,
-      topicFocus: dto.topicFocus
-    }
+      topicFocus: dto.topicFocus,
+    },
+    ...(assetCandidates.length ? { assetCandidates } : {}),
   };
 
   return { subject, book, contentForAI };
+}
+
+/**
+ * Resolved-сайдкар теста: грузит Subject (lean) и собирает супермножество ассетов
+ * in-scope тем (глава теста / вся книга) + любые процитированные вопросами ассеты.
+ * Best-effort — при отсутствии предмета вернёт [].
+ */
+export async function resolveTestAssets(test: {
+  subjectId: unknown;
+  bookId?: unknown;
+  chapterId?: unknown;
+  questions?: Array<{ relatedContent?: { assetIds?: unknown } }>;
+}): Promise<IContentAsset[]> {
+  const subject = await Subject.findById(String(test.subjectId)).lean();
+  if (!subject) return [];
+  return collectTestAssets(subject, test);
 }

@@ -3,7 +3,8 @@ import jwt from 'jsonwebtoken';
 import { Server, Socket } from 'socket.io';
 import { SoloAttempt, SoloSession, Test, User } from '../models';
 import { AppError } from '../utils';
-import { gradeAnswer, sanitizeQuestionForClient } from '../utils/entQuestion.util';
+import { gradeAnswer, sanitizeQuestionForKahoot } from '../utils/entQuestion.util';
+import { resolveTestAssets } from '../services/subjectContent.service';
 import { IQuestion, IJWTPayload } from '../types';
 import {
   createLiveRoom,
@@ -14,7 +15,7 @@ import {
   rejoinLiveRoom,
   onLiveUserDisconnect,
   initLiveKahootIo,
-  leaveLiveLobby
+  leaveLiveLobby,
 } from '../services/liveKahoot.service';
 
 type AuthSocket = Socket & { userId?: string; liveRoomId?: string };
@@ -23,7 +24,7 @@ const SOLO_QUESTION_TIME_LIMIT_SEC = 15;
 
 const parseCookieValue = (cookieHeader: string | undefined, name: string): string | null => {
   if (!cookieHeader) return null;
-  const parts = cookieHeader.split(';').map((x) => x.trim());
+  const parts = cookieHeader.split(';').map(x => x.trim());
   for (const part of parts) {
     if (part.startsWith(`${name}=`)) return decodeURIComponent(part.slice(name.length + 1));
   }
@@ -40,7 +41,7 @@ const calculateSoloQuestionScore = (isCorrect: boolean, responseTimeMs: number):
 
 export const initSocketServer = (httpServer: HttpServer): Server => {
   const io = new Server(httpServer, {
-    cors: { origin: true, credentials: true }
+    cors: { origin: true, credentials: true },
   });
 
   initLiveKahootIo(io);
@@ -99,7 +100,11 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
         const result = tryJoinByPin(socket.userId, pin);
         if (!result.ok) {
           if (result.code === 'ALREADY_STARTED') {
-            ack?.({ success: false, code: 'ALREADY_STARTED', message: 'Live Kahoot уже начался, присоединиться нельзя' });
+            ack?.({
+              success: false,
+              code: 'ALREADY_STARTED',
+              message: 'Live Kahoot уже начался, присоединиться нельзя',
+            });
             return;
           }
           ack?.({ success: false, code: 'NOT_FOUND', message: 'Код не найден' });
@@ -145,32 +150,35 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
       }
     });
 
-    socket.on('live:ready', (payload: { roomId: string; ready: boolean }, ack?: (data: any) => void) => {
-      try {
-        if (!socket.userId) throw AppError.unauthorized('Not authenticated');
-        const { roomId, ready } = payload || {};
-        if (!roomId) throw AppError.badRequest('roomId is required');
-        if (process.env.NODE_ENV !== 'production') {
-          console.log('[socket:live:ready] вход', {
-            userId: socket.userId,
-            roomId: String(roomId),
-            ready: Boolean(ready)
-          });
-        }
-        const r = setReady(socket.userId, roomId, Boolean(ready));
-        if (!r.ok) {
+    socket.on(
+      'live:ready',
+      (payload: { roomId: string; ready: boolean }, ack?: (data: any) => void) => {
+        try {
+          if (!socket.userId) throw AppError.unauthorized('Not authenticated');
+          const { roomId, ready } = payload || {};
+          if (!roomId) throw AppError.badRequest('roomId is required');
           if (process.env.NODE_ENV !== 'production') {
-            console.log('[socket:live:ready] отказ', { message: r.message, debug: r.debug });
+            console.log('[socket:live:ready] вход', {
+              userId: socket.userId,
+              roomId: String(roomId),
+              ready: Boolean(ready),
+            });
           }
-          ack?.({ success: false, message: r.message, debug: r.debug });
-          return;
+          const r = setReady(socket.userId, roomId, Boolean(ready));
+          if (!r.ok) {
+            if (process.env.NODE_ENV !== 'production') {
+              console.log('[socket:live:ready] отказ', { message: r.message, debug: r.debug });
+            }
+            ack?.({ success: false, message: r.message, debug: r.debug });
+            return;
+          }
+          ack?.({ success: true });
+        } catch (error: any) {
+          console.warn('[socket:live:ready] исключение', error?.message || error);
+          ack?.({ success: false, message: error.message || 'ready failed' });
         }
-        ack?.({ success: true });
-      } catch (error: any) {
-        console.warn('[socket:live:ready] исключение', error?.message || error);
-        ack?.({ success: false, message: error.message || 'ready failed' });
       }
-    });
+    );
 
     socket.on('live:host_start', (payload: { roomId: string }, ack?: (data: any) => void) => {
       try {
@@ -190,12 +198,16 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
 
     socket.on(
       'live:submit_answer',
-      (payload: { roomId: string; questionIndex: number; selectedOption: string }, ack?: (data: any) => void) => {
+      (
+        payload: { roomId: string; questionIndex: number; selectedOption: string },
+        ack?: (data: any) => void
+      ) => {
         try {
           if (!socket.userId) throw AppError.unauthorized('Not authenticated');
           const { roomId, questionIndex, selectedOption } = payload || {};
           if (!roomId) throw AppError.badRequest('roomId is required');
-          if (typeof questionIndex !== 'number') throw AppError.badRequest('questionIndex is required');
+          if (typeof questionIndex !== 'number')
+            throw AppError.badRequest('questionIndex is required');
           const r = submitLiveAnswer(socket.userId, roomId, questionIndex, selectedOption || '');
           if (!r.ok) {
             ack?.({ success: false, message: r.message });
@@ -212,34 +224,40 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
       onLiveUserDisconnect(socket.userId || '', socket.liveRoomId);
     });
 
-    socket.on('solo:join', async (payload: { soloSessionId: string }, ack?: (data: any) => void) => {
-      try {
-        const { soloSessionId } = payload || {};
-        if (!soloSessionId) throw AppError.badRequest('soloSessionId is required');
-        const session = await SoloSession.findById(soloSessionId);
-        if (!session) throw AppError.notFound('Solo session not found');
-        if (session.userId.toString() !== socket.userId) throw AppError.forbidden('Access denied');
+    socket.on(
+      'solo:join',
+      async (payload: { soloSessionId: string }, ack?: (data: any) => void) => {
+        try {
+          const { soloSessionId } = payload || {};
+          if (!soloSessionId) throw AppError.badRequest('soloSessionId is required');
+          const session = await SoloSession.findById(soloSessionId);
+          if (!session) throw AppError.notFound('Solo session not found');
+          if (session.userId.toString() !== socket.userId)
+            throw AppError.forbidden('Access denied');
 
-        const test = await Test.findById(session.testId);
-        if (!test) throw AppError.notFound('Test not found');
+          const test = await Test.findById(session.testId);
+          if (!test) throw AppError.notFound('Test not found');
 
-        socket.join(`solo:${session.id}`);
-        const question = test.questions[session.currentQuestionIndex];
-        ack?.({
-          success: true,
-          session: {
-            soloSessionId: session.id,
-            currentQuestionIndex: session.currentQuestionIndex,
-            questionStartedAt: session.questionStartedAt,
-            questionTimeLimitSec: session.questionTimeLimitSec,
-            totalQuestions: test.questions.length,
-            question: question ? sanitizeQuestionForClient(question as IQuestion) : null
-          }
-        });
-      } catch (error: any) {
-        ack?.({ success: false, message: error.message || 'Join failed' });
+          socket.join(`solo:${session.id}`);
+          const question = test.questions[session.currentQuestionIndex];
+          const assets = await resolveTestAssets(test);
+          ack?.({
+            success: true,
+            session: {
+              soloSessionId: session.id,
+              currentQuestionIndex: session.currentQuestionIndex,
+              questionStartedAt: session.questionStartedAt,
+              questionTimeLimitSec: session.questionTimeLimitSec,
+              totalQuestions: test.questions.length,
+              assets,
+              question: question ? sanitizeQuestionForKahoot(question as IQuestion) : null,
+            },
+          });
+        } catch (error: any) {
+          ack?.({ success: false, message: error.message || 'Join failed' });
+        }
       }
-    });
+    );
 
     socket.on(
       'solo:answer',
@@ -252,9 +270,11 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
           if (!soloSessionId) throw AppError.badRequest('soloSessionId is required');
           const session = await SoloSession.findById(soloSessionId);
           if (!session) throw AppError.notFound('Solo session not found');
-          if (session.userId.toString() !== socket.userId) throw AppError.forbidden('Access denied');
+          if (session.userId.toString() !== socket.userId)
+            throw AppError.forbidden('Access denied');
           if (session.isFinished) throw AppError.badRequest('Solo session already finished');
-          if (session.currentQuestionIndex !== questionIndex) throw AppError.badRequest('Question index mismatch');
+          if (session.currentQuestionIndex !== questionIndex)
+            throw AppError.badRequest('Question index mismatch');
 
           const test = await Test.findById(session.testId);
           if (!test) throw AppError.notFound('Test not found');
@@ -274,7 +294,7 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
             selectedOption: selectedOption || '',
             isCorrect,
             responseTimeMs: cappedMs,
-            questionScore
+            questionScore,
           });
           session.currentQuestionIndex = nextIndex;
           session.questionStartedAt = new Date();
@@ -282,6 +302,7 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
           await session.save();
 
           const nextQuestion = isLastQuestion ? null : test.questions[nextIndex];
+          const assets = await resolveTestAssets(test);
 
           ack?.({
             success: true,
@@ -293,7 +314,10 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
             finished: isLastQuestion,
             nextQuestionIndex: isLastQuestion ? null : nextIndex,
             questionStartedAt: isLastQuestion ? null : session.questionStartedAt,
-            nextQuestion: nextQuestion ? sanitizeQuestionForClient(nextQuestion as IQuestion) : null
+            assets,
+            nextQuestion: nextQuestion
+              ? sanitizeQuestionForKahoot(nextQuestion as IQuestion)
+              : null,
           });
         } catch (error: any) {
           ack?.({ success: false, message: error.message || 'Answer failed' });
@@ -301,79 +325,82 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
       }
     );
 
-    socket.on('solo:finish', async (payload: { soloSessionId: string }, ack?: (data: any) => void) => {
-      try {
-        const { soloSessionId } = payload || {};
-        if (!soloSessionId) throw AppError.badRequest('soloSessionId is required');
-        const session = await SoloSession.findById(soloSessionId);
-        if (!session) throw AppError.notFound('Solo session not found');
-        if (session.userId.toString() !== socket.userId) throw AppError.forbidden('Access denied');
+    socket.on(
+      'solo:finish',
+      async (payload: { soloSessionId: string }, ack?: (data: any) => void) => {
+        try {
+          const { soloSessionId } = payload || {};
+          if (!soloSessionId) throw AppError.badRequest('soloSessionId is required');
+          const session = await SoloSession.findById(soloSessionId);
+          if (!session) throw AppError.notFound('Solo session not found');
+          if (session.userId.toString() !== socket.userId)
+            throw AppError.forbidden('Access denied');
 
-        const test = await Test.findById(session.testId);
-        if (!test) throw AppError.notFound('Test not found');
-        if (session.answers.length !== test.questions.length) {
-          throw AppError.badRequest('Solo session is not complete yet');
-        }
+          const test = await Test.findById(session.testId);
+          if (!test) throw AppError.notFound('Test not found');
+          if (session.answers.length !== test.questions.length) {
+            throw AppError.badRequest('Solo session is not complete yet');
+          }
 
-        const alreadyExists = await SoloAttempt.findOne({
-          userId: session.userId,
-          dailyPackId: session.dailyPackId,
-          createdAt: { $gte: session.createdAt },
-          totalQuestions: test.questions.length
-        }).sort({ createdAt: -1 });
-
-        if (alreadyExists) {
-          ack?.({ success: true, duplicate: true });
-          return;
-        }
-
-        const finalScore = session.answers.reduce((sum, item) => sum + item.questionScore, 0);
-        const correctCount = session.answers.filter((item) => item.isCorrect).length;
-
-        const createdAttempt = await SoloAttempt.create({
-          userId: session.userId,
-          subjectId: test.subjectId,
-          bookId: test.bookId,
-          chapterId: test.chapterId,
-          dailyPackId: session.dailyPackId,
-          attemptType: session.attemptType,
-          finalScore,
-          correctCount,
-          answeredCount: session.answers.length,
-          totalQuestions: test.questions.length
-        });
-
-        const betterCount = await SoloAttempt.countDocuments({
-          dailyPackId: session.dailyPackId,
-          attemptType: 'ranked',
-          $or: [
-            { finalScore: { $gt: finalScore } },
-            { finalScore, createdAt: { $lt: createdAttempt.createdAt } }
-          ]
-        });
-
-        ack?.({
-          success: true,
-          result: {
-            totalQuestions: test.questions.length,
-            correctAnswers: correctCount,
-            scorePercent: Math.round((correctCount / test.questions.length) * 100)
-          },
-          solo: {
+          const alreadyExists = await SoloAttempt.findOne({
+            userId: session.userId,
             dailyPackId: session.dailyPackId,
-            mode: session.mode,
+            createdAt: { $gte: session.createdAt },
+            totalQuestions: test.questions.length,
+          }).sort({ createdAt: -1 });
+
+          if (alreadyExists) {
+            ack?.({ success: true, duplicate: true });
+            return;
+          }
+
+          const finalScore = session.answers.reduce((sum, item) => sum + item.questionScore, 0);
+          const correctCount = session.answers.filter(item => item.isCorrect).length;
+
+          const createdAttempt = await SoloAttempt.create({
+            userId: session.userId,
+            subjectId: test.subjectId,
+            bookId: test.bookId,
+            chapterId: test.chapterId,
+            dailyPackId: session.dailyPackId,
             attemptType: session.attemptType,
             finalScore,
-            questionTimeLimitSec: session.questionTimeLimitSec,
-            rank: session.attemptType === 'ranked' ? betterCount + 1 : null
-          }
-        });
-      } catch (error: any) {
-        ack?.({ success: false, message: error.message || 'Finish failed' });
+            correctCount,
+            answeredCount: session.answers.length,
+            totalQuestions: test.questions.length,
+          });
+
+          const betterCount = await SoloAttempt.countDocuments({
+            dailyPackId: session.dailyPackId,
+            attemptType: 'ranked',
+            $or: [
+              { finalScore: { $gt: finalScore } },
+              { finalScore, createdAt: { $lt: createdAttempt.createdAt } },
+            ],
+          });
+
+          ack?.({
+            success: true,
+            result: {
+              totalQuestions: test.questions.length,
+              correctAnswers: correctCount,
+              scorePercent: Math.round((correctCount / test.questions.length) * 100),
+            },
+            solo: {
+              dailyPackId: session.dailyPackId,
+              mode: session.mode,
+              attemptType: session.attemptType,
+              finalScore,
+              questionTimeLimitSec: session.questionTimeLimitSec,
+              rank: session.attemptType === 'ranked' ? betterCount + 1 : null,
+            },
+          });
+        } catch (error: any) {
+          ack?.({ success: false, message: error.message || 'Finish failed' });
+        }
       }
-    });
+    );
   });
 
   return io;
 };
-

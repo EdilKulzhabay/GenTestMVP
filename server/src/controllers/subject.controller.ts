@@ -24,6 +24,7 @@ import {
 } from '../types';
 import { success, AppError } from '../utils';
 import { API_BASE_PATH } from '../config/constants';
+import { enrichImageAssetInBackground } from '../services/asset.ai.service';
 
 /**
  * Проверяет, что posted — перестановка existing (тот же набор id, без пропусков/дублей/чужих).
@@ -591,6 +592,18 @@ class SubjectController {
     if (!topic.assets) topic.assets = [];
     topic.assets.push(asset);
     await subject.save();
+
+    // Best-effort фоновой enrich изображения (llmDescription) — не блокирует ответ.
+    const created = topic.assets[topic.assets.length - 1];
+    if (created?.kind === 'image' && created.url) {
+      enrichImageAssetInBackground({
+        subjectId: String(subject._id),
+        bookId: String(book._id),
+        chapterId: String(chapter._id),
+        topicId: String(topic._id),
+        assetId: String(created._id),
+      });
+    }
     success(res, subject, 'Asset added successfully', 201);
   }
 
@@ -616,9 +629,22 @@ class SubjectController {
     delete replacement.embedding;
     replacement._id = existing._id;
     replacement.kind = existing.kind;
-    if (existing.enrichment) replacement.enrichment = existing.enrichment;
+    // Enrichment переносим только если картинка не менялась; при смене url — сбрасываем (перезапустим enrich).
+    const urlChanged =
+      existing.kind === 'image' && String(existing.url ?? '') !== String(replacement.url ?? '');
+    if (existing.enrichment && !urlChanged) replacement.enrichment = existing.enrichment;
     topic.assets.splice(idx, 1, replacement);
     await subject.save();
+
+    if (replacement.kind === 'image' && replacement.url && !replacement.enrichment) {
+      enrichImageAssetInBackground({
+        subjectId: String(subject._id),
+        bookId: String(book._id),
+        chapterId: String(chapter._id),
+        topicId: String(topic._id),
+        assetId: String(existing._id),
+      });
+    }
     success(res, subject, 'Asset updated');
   }
 

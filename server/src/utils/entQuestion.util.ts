@@ -6,7 +6,7 @@ export const ENT_QUESTION_TYPES: EntQuestionType[] = [
   'matching_single',
   'matching_multiple',
   'short_answer',
-  'text_input'
+  'text_input',
 ];
 
 export function getQuestionType(q: Partial<IQuestion>): EntQuestionType {
@@ -69,10 +69,10 @@ export function formatExpectedAnswer(q: IQuestion): string {
       const cm = q.correctMatching ?? {};
       const left = q.matchingLeft ?? [];
       const right = q.matchingRight ?? [];
-      const lines = Object.keys(cm).map((lid) => {
-        const lt = left.find((x) => x.id === lid)?.text ?? lid;
+      const lines = Object.keys(cm).map(lid => {
+        const lt = left.find(x => x.id === lid)?.text ?? lid;
         const rid = cm[lid] as string;
-        const rt = right.find((x) => x.id === rid)?.text ?? rid;
+        const rt = right.find(x => x.id === rid)?.text ?? rid;
         return `${lt} → ${rt}`;
       });
       return lines.join(' | ');
@@ -81,10 +81,10 @@ export function formatExpectedAnswer(q: IQuestion): string {
       const cm = q.correctMatching ?? {};
       const left = q.matchingLeft ?? [];
       const right = q.matchingRight ?? [];
-      const lines = Object.keys(cm).map((lid) => {
-        const lt = left.find((x) => x.id === lid)?.text ?? lid;
+      const lines = Object.keys(cm).map(lid => {
+        const lt = left.find(x => x.id === lid)?.text ?? lid;
         const rids = cm[lid] as string[];
-        const rt = (rids || []).map((rid) => right.find((x) => x.id === rid)?.text ?? rid).join(', ');
+        const rt = (rids || []).map(rid => right.find(x => x.id === rid)?.text ?? rid).join(', ');
         return `${lt} → [${rt}]`;
       });
       return lines.join(' | ');
@@ -112,7 +112,7 @@ export function clientPrefillValueForQuestion(q: IQuestion): string {
     case 'single_choice':
       return (q.correctOption ?? '').trim();
     case 'multiple_choice': {
-      const co = (q.correctOptions ?? []).filter((x) => String(x).trim());
+      const co = (q.correctOptions ?? []).filter(x => String(x).trim());
       if (co.length === 0) return '';
       return JSON.stringify([...co].map(String).sort());
     }
@@ -123,15 +123,15 @@ export function clientPrefillValueForQuestion(q: IQuestion): string {
       return JSON.stringify(cm);
     }
     case 'short_answer': {
-      const a = (q.acceptableAnswers ?? []).find((x) => String(x).trim());
+      const a = (q.acceptableAnswers ?? []).find(x => String(x).trim());
       return a ? String(a).trim() : '';
     }
     case 'text_input': {
       const ref = (q.referenceAnswer ?? '').trim();
       if (ref) return ref;
-      const aa = (q.acceptableAnswers ?? []).find((x) => String(x).trim());
+      const aa = (q.acceptableAnswers ?? []).find(x => String(x).trim());
       if (aa) return String(aa).trim();
-      const kw = (q.acceptableKeywords ?? []).find((x) => String(x).trim());
+      const kw = (q.acceptableKeywords ?? []).find(x => String(x).trim());
       return kw ? String(kw).trim() : '';
     }
     default:
@@ -166,8 +166,8 @@ export function gradeAnswer(question: IQuestion, selectedOption: string): boolea
     }
     case 'multiple_choice': {
       const arr = parseJsonArray(raw);
-      if (!arr || !arr.every((x) => typeof x === 'string')) return false;
-      const user = (arr as string[]).map((x) => x.trim());
+      if (!arr || !arr.every(x => typeof x === 'string')) return false;
+      const user = (arr as string[]).map(x => x.trim());
       const correct = question.correctOptions ?? [];
       return setsEqualStrings(user, correct);
     }
@@ -184,7 +184,7 @@ export function gradeAnswer(question: IQuestion, selectedOption: string): boolea
         if (Array.isArray(v) && v.length === 1 && typeof v[0] === 'string') return v[0];
         return null;
       };
-      return keys.every((k) => {
+      return keys.every(k => {
         const cv = asStr(correct[k]);
         const uv = asStr(userObj[k]);
         return cv != null && uv != null && normText(cv) === normText(uv);
@@ -200,7 +200,7 @@ export function gradeAnswer(question: IQuestion, selectedOption: string): boolea
         const cVal = correct[k];
         const uVal = userObj[k];
         if (!Array.isArray(cVal) || !Array.isArray(uVal)) return false;
-        if (!cVal.every((x) => typeof x === 'string') || !uVal.every((x) => typeof x === 'string')) {
+        if (!cVal.every(x => typeof x === 'string') || !uVal.every(x => typeof x === 'string')) {
           return false;
         }
         if (!setsEqualStrings(cVal as string[], uVal as string[])) return false;
@@ -210,16 +210,16 @@ export function gradeAnswer(question: IQuestion, selectedOption: string): boolea
     case 'short_answer': {
       const user = normText(raw);
       const ok = question.acceptableAnswers ?? [];
-      return ok.some((a) => normText(a) === user || user.includes(normText(a)));
+      return ok.some(a => normText(a) === user || user.includes(normText(a)));
     }
     case 'text_input': {
       const user = normText(raw);
       if (user.length < 2) return false;
       const answers = question.acceptableAnswers ?? [];
-      if (answers.some((a) => normText(a) === user || user.includes(normText(a)))) return true;
+      if (answers.some(a => normText(a) === user || user.includes(normText(a)))) return true;
       const kws = question.acceptableKeywords ?? [];
       if (kws.length > 0) {
-        const hit = kws.filter((k) => user.includes(normText(k))).length;
+        const hit = kws.filter(k => user.includes(normText(k))).length;
         return hit >= Math.min(kws.length, Math.max(1, Math.ceil(kws.length * 0.6)));
       }
       const ref = question.referenceAnswer?.trim();
@@ -239,7 +239,7 @@ export function sanitizeQuestionForClient(q: IQuestion): Record<string, unknown>
   const base: Record<string, unknown> = {
     questionType: qt,
     questionText: q.questionText,
-    relatedContent: q.relatedContent
+    relatedContent: q.relatedContent,
   };
   switch (qt) {
     case 'single_choice':
@@ -263,15 +263,38 @@ export function sanitizeQuestionForClient(q: IQuestion): Record<string, unknown>
   return base;
 }
 
+/**
+ * Санитайз для Kahoot/Solo (сокет): ClientQuestion у фронта не несёт relatedContent,
+ * поэтому assetIds хойстятся на топ-левел вопроса. В HTTP-пути остаётся вложенным.
+ */
+export function sanitizeQuestionForKahoot(q: IQuestion): Record<string, unknown> {
+  const assetIds = q.relatedContent?.assetIds;
+  return {
+    ...sanitizeQuestionForClient(q),
+    assetIds: Array.isArray(assetIds) ? assetIds.map(String) : [],
+  };
+}
+
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);
 }
 
-function validateMatchingItems(label: string, items: IMatchingItem[] | undefined, min: number, max: number) {
-  assert(items && items.length >= min && items.length <= max, `${label}: ожидается ${min}–${max} элементов`);
-  const ids = items.map((x) => x.id?.trim()).filter(Boolean);
+function validateMatchingItems(
+  label: string,
+  items: IMatchingItem[] | undefined,
+  min: number,
+  max: number
+) {
+  assert(
+    items && items.length >= min && items.length <= max,
+    `${label}: ожидается ${min}–${max} элементов`
+  );
+  const ids = items.map(x => x.id?.trim()).filter(Boolean);
   assert(ids.length === items.length, `${label}: у каждого элемента нужен id`);
-  assert(uniqStrings(ids as string[]).length === ids.length, `${label}: id должны быть уникальными`);
+  assert(
+    uniqStrings(ids as string[]).length === ids.length,
+    `${label}: id должны быть уникальными`
+  );
 }
 
 /** LLM иногда пишет explanation вместо aiExplanation или оставляет пусто */
@@ -296,37 +319,51 @@ export function validateEntQuestion(q: unknown, index: number): IQuestion {
   const aiExplanation = pickAiExplanation(o);
 
   const rc = (o.relatedContent as Record<string, unknown>) || {};
-  const pages = Array.isArray(rc.pages) ? rc.pages.map((p) => Number(p)).filter((n) => !Number.isNaN(n)) : [];
+  const pages = Array.isArray(rc.pages)
+    ? rc.pages.map(p => Number(p)).filter(n => !Number.isNaN(n))
+    : [];
   const relatedContent = {
     pages: pages.length ? pages : [1],
-    topicTitle: rc.topicTitle != null ? String(rc.topicTitle) : undefined
+    topicTitle: rc.topicTitle != null ? String(rc.topicTitle) : undefined,
+    assetIds: Array.isArray(rc.assetIds) ? rc.assetIds.map(String) : undefined,
   } as IQuestion['relatedContent'];
 
   const base: IQuestion = {
     questionType: qt,
     questionText,
     aiExplanation,
-    relatedContent
+    relatedContent,
   };
 
   if (qt === 'single_choice') {
-    const options = (o.options as string[])?.map((x) => String(x).trim()).filter(Boolean) ?? [];
-    assert(options.length >= 4 && options.length <= 5, `Вопрос ${index + 1}: single_choice — 4–5 вариантов`);
+    const options = (o.options as string[])?.map(x => String(x).trim()).filter(Boolean) ?? [];
+    assert(
+      options.length >= 4 && options.length <= 5,
+      `Вопрос ${index + 1}: single_choice — 4–5 вариантов`
+    );
     const correctOption = String(o.correctOption ?? '').trim();
-    assert(options.includes(correctOption), `Вопрос ${index + 1}: correctOption должен быть из options`);
+    assert(
+      options.includes(correctOption),
+      `Вопрос ${index + 1}: correctOption должен быть из options`
+    );
     return { ...base, options, correctOption };
   }
 
   if (qt === 'multiple_choice') {
-    const options = (o.options as string[])?.map((x) => String(x).trim()).filter(Boolean) ?? [];
+    const options = (o.options as string[])?.map(x => String(x).trim()).filter(Boolean) ?? [];
     /** 4–10: как single_choice, модель иногда даёт ровно 4 варианта */
     assert(
       options.length >= 4 && options.length <= 10,
       `Вопрос ${index + 1}: multiple_choice — от 4 до 10 вариантов (сейчас ${options.length})`
     );
-    const correctOptions = ((o.correctOptions as string[]) ?? []).map((x) => String(x).trim()).filter(Boolean);
+    const correctOptions = ((o.correctOptions as string[]) ?? [])
+      .map(x => String(x).trim())
+      .filter(Boolean);
     assert(correctOptions.length >= 2, `Вопрос ${index + 1}: минимум 2 правильных варианта`);
-    assert(correctOptions.every((c) => options.includes(c)), `Вопрос ${index + 1}: correctOptions ⊆ options`);
+    assert(
+      correctOptions.every(c => options.includes(c)),
+      `Вопрос ${index + 1}: correctOptions ⊆ options`
+    );
     return { ...base, options, correctOptions: uniqStrings(correctOptions) };
   }
 
@@ -336,17 +373,23 @@ export function validateEntQuestion(q: unknown, index: number): IQuestion {
     validateMatchingItems('matchingLeft', matchingLeft, 3, 5);
     validateMatchingItems('matchingRight', matchingRight, 3, 6);
     const correctMatching = o.correctMatching as Record<string, string>;
-    assert(correctMatching && typeof correctMatching === 'object', `Вопрос ${index + 1}: нужен correctMatching`);
-    const leftIds = matchingLeft.map((x) => x.id);
     assert(
-      leftIds.every((id) => typeof correctMatching[id] === 'string'),
+      correctMatching && typeof correctMatching === 'object',
+      `Вопрос ${index + 1}: нужен correctMatching`
+    );
+    const leftIds = matchingLeft.map(x => x.id);
+    assert(
+      leftIds.every(id => typeof correctMatching[id] === 'string'),
       `Вопрос ${index + 1}: для каждого left id нужна пара в correctMatching`
     );
-    const rightIds = matchingRight.map((x) => x.id);
+    const rightIds = matchingRight.map(x => x.id);
     const usedRight: string[] = [];
     for (const lid of leftIds) {
       const rid = correctMatching[lid];
-      assert(rightIds.includes(rid), `Вопрос ${index + 1}: значение correctMatching должно быть id из matchingRight`);
+      assert(
+        rightIds.includes(rid),
+        `Вопрос ${index + 1}: значение correctMatching должно быть id из matchingRight`
+      );
       usedRight.push(rid);
     }
     assert(
@@ -367,25 +410,40 @@ export function validateEntQuestion(q: unknown, index: number): IQuestion {
       correctMatching && typeof correctMatching === 'object' && !Array.isArray(correctMatching),
       `Вопрос ${index + 1}: нужен correctMatching`
     );
-    const leftIds = matchingLeft.map((x) => x.id);
-    const rightIds = matchingRight.map((x) => x.id);
+    const leftIds = matchingLeft.map(x => x.id);
+    const rightIds = matchingRight.map(x => x.id);
     for (const lid of leftIds) {
       const arr = correctMatching[lid];
-      assert(Array.isArray(arr) && arr.length >= 1, `Вопрос ${index + 1}: для ${lid} нужен непустой массив правых id`);
-      assert(arr.every((rid) => typeof rid === 'string' && rightIds.includes(rid)), `Вопрос ${index + 1}: неверные right id`);
+      assert(
+        Array.isArray(arr) && arr.length >= 1,
+        `Вопрос ${index + 1}: для ${lid} нужен непустой массив правых id`
+      );
+      assert(
+        arr.every(rid => typeof rid === 'string' && rightIds.includes(rid)),
+        `Вопрос ${index + 1}: неверные right id`
+      );
     }
     return { ...base, matchingLeft, matchingRight, correctMatching };
   }
 
   if (qt === 'short_answer') {
-    const acceptableAnswers = ((o.acceptableAnswers as string[]) ?? []).map((x) => String(x).trim()).filter(Boolean);
-    assert(acceptableAnswers.length >= 1, `Вопрос ${index + 1}: short_answer — нужен acceptableAnswers`);
+    const acceptableAnswers = ((o.acceptableAnswers as string[]) ?? [])
+      .map(x => String(x).trim())
+      .filter(Boolean);
+    assert(
+      acceptableAnswers.length >= 1,
+      `Вопрос ${index + 1}: short_answer — нужен acceptableAnswers`
+    );
     return { ...base, acceptableAnswers: uniqStrings(acceptableAnswers) };
   }
 
   if (qt === 'text_input') {
-    const acceptableAnswers = ((o.acceptableAnswers as string[]) ?? []).map((x) => String(x).trim()).filter(Boolean);
-    const acceptableKeywords = ((o.acceptableKeywords as string[]) ?? []).map((x) => String(x).trim()).filter(Boolean);
+    const acceptableAnswers = ((o.acceptableAnswers as string[]) ?? [])
+      .map(x => String(x).trim())
+      .filter(Boolean);
+    const acceptableKeywords = ((o.acceptableKeywords as string[]) ?? [])
+      .map(x => String(x).trim())
+      .filter(Boolean);
     const referenceAnswer = o.referenceAnswer != null ? String(o.referenceAnswer).trim() : '';
     assert(
       acceptableAnswers.length > 0 || acceptableKeywords.length > 0 || referenceAnswer.length > 0,
@@ -395,7 +453,7 @@ export function validateEntQuestion(q: unknown, index: number): IQuestion {
       ...base,
       acceptableAnswers: acceptableAnswers.length ? uniqStrings(acceptableAnswers) : undefined,
       acceptableKeywords: acceptableKeywords.length ? uniqStrings(acceptableKeywords) : undefined,
-      referenceAnswer: referenceAnswer || undefined
+      referenceAnswer: referenceAnswer || undefined,
     };
   }
 
@@ -419,16 +477,22 @@ export function validateRegularQuestion(raw: unknown, index: number): IQuestion 
   const o = raw as Record<string, unknown>;
   const questionText = String(o.questionText ?? '').trim();
   assert(questionText.length >= 5, `Вопрос ${index + 1}: слишком короткий questionText`);
-  const options = (o.options as string[])?.map((x) => String(x).trim()).filter(Boolean) ?? [];
+  const options = (o.options as string[])?.map(x => String(x).trim()).filter(Boolean) ?? [];
   assert(options.length === 4, `Вопрос ${index + 1}: нужно ровно 4 варианта ответа`);
   const correctOption = String(o.correctOption ?? '').trim();
-  assert(options.includes(correctOption), `Вопрос ${index + 1}: correctOption должен совпадать с одним из options`);
+  assert(
+    options.includes(correctOption),
+    `Вопрос ${index + 1}: correctOption должен совпадать с одним из options`
+  );
   const aiExplanation = pickAiExplanation(o);
   const rc = (o.relatedContent as Record<string, unknown>) || {};
-  const pages = Array.isArray(rc.pages) ? rc.pages.map((p) => Number(p)).filter((n) => !Number.isNaN(n)) : [];
+  const pages = Array.isArray(rc.pages)
+    ? rc.pages.map(p => Number(p)).filter(n => !Number.isNaN(n))
+    : [];
   const relatedContent: IRelatedContent = {
     pages: pages.length ? pages : [1],
-    topicTitle: rc.topicTitle != null ? String(rc.topicTitle) : undefined
+    topicTitle: rc.topicTitle != null ? String(rc.topicTitle) : undefined,
+    assetIds: Array.isArray(rc.assetIds) ? rc.assetIds.map(String) : undefined,
   };
   return {
     questionType: 'single_choice',
@@ -436,12 +500,15 @@ export function validateRegularQuestion(raw: unknown, index: number): IQuestion 
     options,
     correctOption,
     aiExplanation,
-    relatedContent
+    relatedContent,
   };
 }
 
 /** Обычный тест: N× single_choice, ровно 4 варианта (N по запросу, по умолчанию 10) */
-export function parseAndValidateRegularQuestions(questions: unknown, expectedCount = 10): IQuestion[] {
+export function parseAndValidateRegularQuestions(
+  questions: unknown,
+  expectedCount = 10
+): IQuestion[] {
   if (!Array.isArray(questions)) {
     throw new Error('OpenAI response: поле questions отсутствует или не массив.');
   }
@@ -466,7 +533,7 @@ export function parseRegularQuestionsLenient(questions: unknown): IQuestion[] {
     try {
       const q = validateRegularQuestion(raw, index);
       // Качество банка: 4 варианта должны быть различны (иначе вопрос неполноценный).
-      const opts = (q.options ?? []).map((o) => o.trim().toLowerCase());
+      const opts = (q.options ?? []).map(o => o.trim().toLowerCase());
       if (new Set(opts).size !== opts.length) {
         throw new Error(`Вопрос ${index + 1}: варианты ответа не уникальны`);
       }
@@ -496,7 +563,7 @@ export function parseEntQuestionsLenient(questions: unknown): IQuestion[] {
       const q = validateEntQuestion(raw, index);
       const qt = getQuestionType(q);
       if (qt === 'single_choice' || qt === 'multiple_choice') {
-        const opts = (q.options ?? []).map((o) => o.trim().toLowerCase());
+        const opts = (q.options ?? []).map(o => o.trim().toLowerCase());
         if (new Set(opts).size !== opts.length) {
           throw new Error(`Вопрос ${index + 1}: варианты ответа не уникальны`);
         }
