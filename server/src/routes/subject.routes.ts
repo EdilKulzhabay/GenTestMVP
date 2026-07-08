@@ -1,7 +1,15 @@
 import { Router } from 'express';
 import { body, param, query } from 'express-validator';
 import { subjectController } from '../controllers';
-import { authenticate, isAdmin, isTeacherOrAdmin, asyncHandler, validate } from '../middlewares';
+import {
+  authenticate,
+  isAdmin,
+  isTeacherOrAdmin,
+  asyncHandler,
+  validate,
+  assignAssetFileId,
+  assetUpload,
+} from '../middlewares';
 
 /**
  * SUBJECT ROUTES
@@ -19,7 +27,7 @@ router.get(
     query('subjectKind')
       .optional()
       .isIn(['main', 'profile'])
-      .withMessage('subjectKind must be main or profile')
+      .withMessage('subjectKind must be main or profile'),
   ],
   validate,
   asyncHandler(subjectController.getAllSubjects.bind(subjectController))
@@ -27,11 +35,7 @@ router.get(
 
 router.get(
   '/:id',
-  [
-    param('id')
-      .isMongoId()
-      .withMessage('Invalid subject ID')
-  ],
+  [param('id').isMongoId().withMessage('Invalid subject ID')],
   validate,
   asyncHandler(subjectController.getSubjectById.bind(subjectController))
 );
@@ -48,11 +52,8 @@ router.post(
   '/import',
   isAdmin,
   [
-    body('title')
-      .trim()
-      .isLength({ min: 1, max: 200 })
-      .withMessage('Title is required'),
-    body('updateIfExists').optional().isBoolean().withMessage('updateIfExists must be boolean')
+    body('title').trim().isLength({ min: 1, max: 200 }).withMessage('Title is required'),
+    body('updateIfExists').optional().isBoolean().withMessage('updateIfExists must be boolean'),
   ],
   validate,
   asyncHandler(subjectController.importSubject.bind(subjectController))
@@ -79,7 +80,7 @@ router.post(
     body('subjectKind')
       .optional()
       .isIn(['main', 'profile'])
-      .withMessage('subjectKind must be main or profile')
+      .withMessage('subjectKind must be main or profile'),
   ],
   validate,
   asyncHandler(subjectController.createSubject.bind(subjectController))
@@ -94,9 +95,7 @@ router.post(
   '/:id/books',
   isTeacherOrAdmin,
   [
-    param('id')
-      .isMongoId()
-      .withMessage('Invalid subject ID'),
+    param('id').isMongoId().withMessage('Invalid subject ID'),
     body('title')
       .trim()
       .isLength({ min: 1, max: 300 })
@@ -110,7 +109,7 @@ router.post(
       .optional()
       .trim()
       .isLength({ max: 80 })
-      .withMessage('contentLanguage must be at most 80 characters')
+      .withMessage('contentLanguage must be at most 80 characters'),
   ],
   validate,
   asyncHandler(subjectController.addBook.bind(subjectController))
@@ -127,13 +126,27 @@ router.post(
   [
     param('subjectId').isMongoId(),
     body('book').isObject().withMessage('book is required'),
-    body('book.title').trim().isLength({ min: 1, max: 300 }).withMessage('book.title must be 1..300 chars'),
+    body('book.title')
+      .trim()
+      .isLength({ min: 1, max: 300 })
+      .withMessage('book.title must be 1..300 chars'),
     body('book.chapters').optional().isArray().withMessage('book.chapters must be an array'),
-    body('book.chapters.*.title').trim().isLength({ min: 1, max: 300 }).withMessage('chapter title must be 1..300 chars'),
+    body('book.chapters.*.title')
+      .trim()
+      .isLength({ min: 1, max: 300 })
+      .withMessage('chapter title must be 1..300 chars'),
     body('book.chapters.*.topics').isArray().withMessage('chapter.topics must be an array'),
-    body('book.chapters.*.topics.*.title').trim().isLength({ min: 1, max: 300 }).withMessage('topic title must be 1..300 chars'),
-    body('book.chapters.*.topics.*.paragraphs').isArray().withMessage('topic.paragraphs must be an array'),
-    body('book.chapters.*.topics.*.paragraphs.*.content.text').trim().isLength({ min: 1 }).withMessage('paragraph content.text is required')
+    body('book.chapters.*.topics.*.title')
+      .trim()
+      .isLength({ min: 1, max: 300 })
+      .withMessage('topic title must be 1..300 chars'),
+    body('book.chapters.*.topics.*.paragraphs')
+      .isArray()
+      .withMessage('topic.paragraphs must be an array'),
+    body('book.chapters.*.topics.*.paragraphs.*.content.text')
+      .trim()
+      .isLength({ min: 1 })
+      .withMessage('paragraph content.text is required'),
   ],
   validate,
   asyncHandler(subjectController.importBook.bind(subjectController))
@@ -148,19 +161,13 @@ router.post(
   '/books/:bookId/chapters',
   isTeacherOrAdmin,
   [
-    param('bookId')
-      .isMongoId()
-      .withMessage('Invalid book ID'),
-    query('subjectId')
-      .isMongoId()
-      .withMessage('Invalid subject ID in query'),
+    param('bookId').isMongoId().withMessage('Invalid book ID'),
+    query('subjectId').isMongoId().withMessage('Invalid subject ID in query'),
     body('title')
       .trim()
       .isLength({ min: 1, max: 200 })
       .withMessage('Title must be between 1 and 200 characters'),
-    body('order')
-      .isInt({ min: 0 })
-      .withMessage('Order must be a non-negative integer')
+    body('order').isInt({ min: 0 }).withMessage('Order must be a non-negative integer'),
   ],
   validate,
   asyncHandler(subjectController.addChapter.bind(subjectController))
@@ -175,19 +182,13 @@ router.post(
   '/chapters/:chapterId/topics',
   isTeacherOrAdmin,
   [
-    param('chapterId')
-      .isMongoId()
-      .withMessage('Invalid chapter ID'),
-    query('subjectId')
-      .isMongoId()
-      .withMessage('Invalid subject ID in query'),
-    query('bookId')
-      .isMongoId()
-      .withMessage('Invalid book ID in query'),
+    param('chapterId').isMongoId().withMessage('Invalid chapter ID'),
+    query('subjectId').isMongoId().withMessage('Invalid subject ID in query'),
+    query('bookId').isMongoId().withMessage('Invalid book ID in query'),
     body('title')
       .trim()
       .isLength({ min: 1, max: 200 })
-      .withMessage('Title must be between 1 and 200 characters')
+      .withMessage('Title must be between 1 and 200 characters'),
   ],
   validate,
   asyncHandler(subjectController.addTopic.bind(subjectController))
@@ -202,34 +203,97 @@ router.post(
   '/topics/:topicId/paragraphs',
   isTeacherOrAdmin,
   [
-    param('topicId')
-      .isMongoId()
-      .withMessage('Invalid topic ID'),
-    query('subjectId')
-      .isMongoId()
-      .withMessage('Invalid subject ID in query'),
-    query('bookId')
-      .isMongoId()
-      .withMessage('Invalid book ID in query'),
-    query('chapterId')
-      .isMongoId()
-      .withMessage('Invalid chapter ID in query'),
-    body('order')
-      .isInt({ min: 0 })
-      .withMessage('Order must be a non-negative integer'),
-    body('content.text')
-      .trim()
-      .isLength({ min: 1 })
-      .withMessage('Content text is required'),
-    body('content.pages')
-      .isArray()
-      .withMessage('Content pages must be an array'),
-    body('content.metadata')
-      .isObject()
-      .withMessage('Content metadata is required')
+    param('topicId').isMongoId().withMessage('Invalid topic ID'),
+    query('subjectId').isMongoId().withMessage('Invalid subject ID in query'),
+    query('bookId').isMongoId().withMessage('Invalid book ID in query'),
+    query('chapterId').isMongoId().withMessage('Invalid chapter ID in query'),
+    body('order').isInt({ min: 0 }).withMessage('Order must be a non-negative integer'),
+    body('content.text').trim().isLength({ min: 1 }).withMessage('Content text is required'),
+    body('content.pages').isArray().withMessage('Content pages must be an array'),
+    body('content.metadata').isObject().withMessage('Content metadata is required'),
   ],
   validate,
   asyncHandler(subjectController.addParagraph.bind(subjectController))
+);
+
+/**
+ * @route   POST /subjects/topics/:topicId/assets
+ * @desc    Добавить ассет темы (таблица/изображение/формула/задача)
+ * @access  Teacher/Admin
+ */
+router.post(
+  '/topics/:topicId/assets',
+  isTeacherOrAdmin,
+  [
+    param('topicId').isMongoId().withMessage('Invalid topic ID'),
+    query('subjectId').isMongoId().withMessage('Invalid subject ID in query'),
+    query('bookId').isMongoId().withMessage('Invalid book ID in query'),
+    query('chapterId').isMongoId().withMessage('Invalid chapter ID in query'),
+    body('kind')
+      .isIn(['table', 'image', 'formula', 'problem'])
+      .withMessage('kind must be table|image|formula|problem'),
+  ],
+  validate,
+  asyncHandler(subjectController.addAsset.bind(subjectController))
+);
+
+/**
+ * @route   POST /subjects/:subjectId/assets/upload
+ * @desc    Загрузка изображения ассета (multipart field 'file')
+ * @access  Teacher/Admin
+ */
+router.post(
+  '/:subjectId/assets/upload',
+  isTeacherOrAdmin,
+  assignAssetFileId,
+  assetUpload.single('file'),
+  [param('subjectId').isMongoId().withMessage('Invalid subject ID')],
+  validate,
+  asyncHandler(subjectController.uploadAsset.bind(subjectController))
+);
+
+router.patch(
+  '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/assets/:assetId',
+  isTeacherOrAdmin,
+  [
+    param('subjectId').isMongoId(),
+    param('bookId').isMongoId(),
+    param('chapterId').isMongoId(),
+    param('topicId').isMongoId(),
+    param('assetId').isMongoId(),
+    body('kind').optional().isIn(['table', 'image', 'formula', 'problem']),
+  ],
+  validate,
+  asyncHandler(subjectController.updateAsset.bind(subjectController))
+);
+
+router.post(
+  '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/assets/reorder',
+  isTeacherOrAdmin,
+  [
+    param('subjectId').isMongoId(),
+    param('bookId').isMongoId(),
+    param('chapterId').isMongoId(),
+    param('topicId').isMongoId(),
+    body('orderedAssetIds').isArray(),
+    body('orderedAssetIds.*').isMongoId(),
+  ],
+  validate,
+  asyncHandler(subjectController.reorderAssets.bind(subjectController))
+);
+
+router.delete(
+  '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/assets/:assetId',
+  isTeacherOrAdmin,
+  [
+    param('subjectId').isMongoId(),
+    param('bookId').isMongoId(),
+    param('chapterId').isMongoId(),
+    param('topicId').isMongoId(),
+    param('assetId').isMongoId(),
+  ],
+  validate,
+  asyncHandler(subjectController.deleteAsset.bind(subjectController))
 );
 
 // ========== UPDATE ==========
@@ -239,7 +303,10 @@ router.patch(
   isAdmin,
   [
     param('id').isMongoId(),
-    body('subjectKind').optional().isIn(['main', 'profile']).withMessage('subjectKind must be main or profile')
+    body('subjectKind')
+      .optional()
+      .isIn(['main', 'profile'])
+      .withMessage('subjectKind must be main or profile'),
   ],
   validate,
   asyncHandler(subjectController.updateSubject.bind(subjectController))
@@ -264,7 +331,12 @@ router.patch(
 router.patch(
   '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId',
   isTeacherOrAdmin,
-  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), param('topicId').isMongoId()],
+  [
+    param('subjectId').isMongoId(),
+    param('bookId').isMongoId(),
+    param('chapterId').isMongoId(),
+    param('topicId').isMongoId(),
+  ],
   validate,
   asyncHandler(subjectController.updateTopic.bind(subjectController))
 );
@@ -280,9 +352,13 @@ router.patch(
     param('paragraphId').isMongoId(),
     body('order').optional().isInt({ min: 0 }).withMessage('order must be a non-negative integer'),
     body('content').optional().isObject(),
-    body('content.text').optional().isString().isLength({ min: 1 }).withMessage('content.text must be non-empty'),
+    body('content.text')
+      .optional()
+      .isString()
+      .isLength({ min: 1 })
+      .withMessage('content.text must be non-empty'),
     body('content.pages').optional().isArray(),
-    body('content.metadata').optional().isObject()
+    body('content.metadata').optional().isObject(),
   ],
   validate,
   asyncHandler(subjectController.updateParagraph.bind(subjectController))
@@ -293,7 +369,12 @@ router.patch(
 router.post(
   '/:subjectId/books/:bookId/chapters/reorder',
   isTeacherOrAdmin,
-  [param('subjectId').isMongoId(), param('bookId').isMongoId(), body('orderedChapterIds').isArray(), body('orderedChapterIds.*').isMongoId()],
+  [
+    param('subjectId').isMongoId(),
+    param('bookId').isMongoId(),
+    body('orderedChapterIds').isArray(),
+    body('orderedChapterIds.*').isMongoId(),
+  ],
   validate,
   asyncHandler(subjectController.reorderChapters.bind(subjectController))
 );
@@ -301,7 +382,13 @@ router.post(
 router.post(
   '/:subjectId/books/:bookId/chapters/:chapterId/topics/reorder',
   isTeacherOrAdmin,
-  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), body('orderedTopicIds').isArray(), body('orderedTopicIds.*').isMongoId()],
+  [
+    param('subjectId').isMongoId(),
+    param('bookId').isMongoId(),
+    param('chapterId').isMongoId(),
+    body('orderedTopicIds').isArray(),
+    body('orderedTopicIds.*').isMongoId(),
+  ],
   validate,
   asyncHandler(subjectController.reorderTopics.bind(subjectController))
 );
@@ -309,7 +396,14 @@ router.post(
 router.post(
   '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/paragraphs/reorder',
   isTeacherOrAdmin,
-  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), param('topicId').isMongoId(), body('orderedParagraphIds').isArray(), body('orderedParagraphIds.*').isMongoId()],
+  [
+    param('subjectId').isMongoId(),
+    param('bookId').isMongoId(),
+    param('chapterId').isMongoId(),
+    param('topicId').isMongoId(),
+    body('orderedParagraphIds').isArray(),
+    body('orderedParagraphIds.*').isMongoId(),
+  ],
   validate,
   asyncHandler(subjectController.reorderParagraphs.bind(subjectController))
 );
@@ -328,7 +422,7 @@ router.put(
     param('chapterId').isMongoId(),
     param('topicId').isMongoId(),
     body('ktpTopicIds').optional().isArray().withMessage('ktpTopicIds must be an array'),
-    body('ktpTopicIds.*').optional().isMongoId().withMessage('ktpTopicIds must contain valid ids')
+    body('ktpTopicIds.*').optional().isMongoId().withMessage('ktpTopicIds must contain valid ids'),
   ],
   validate,
   asyncHandler(subjectController.setTopicKtp.bind(subjectController))
@@ -363,7 +457,12 @@ router.delete(
 router.delete(
   '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId',
   isTeacherOrAdmin,
-  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), param('topicId').isMongoId()],
+  [
+    param('subjectId').isMongoId(),
+    param('bookId').isMongoId(),
+    param('chapterId').isMongoId(),
+    param('topicId').isMongoId(),
+  ],
   validate,
   asyncHandler(subjectController.deleteTopic.bind(subjectController))
 );
@@ -371,7 +470,13 @@ router.delete(
 router.delete(
   '/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/paragraphs/:paragraphId',
   isTeacherOrAdmin,
-  [param('subjectId').isMongoId(), param('bookId').isMongoId(), param('chapterId').isMongoId(), param('topicId').isMongoId(), param('paragraphId').isMongoId()],
+  [
+    param('subjectId').isMongoId(),
+    param('bookId').isMongoId(),
+    param('chapterId').isMongoId(),
+    param('topicId').isMongoId(),
+    param('paragraphId').isMongoId(),
+  ],
   validate,
   asyncHandler(subjectController.deleteParagraph.bind(subjectController))
 );
