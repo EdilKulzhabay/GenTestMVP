@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { IContentAsset } from './index';
 
 export type RoadmapAvailability = 'locked' | 'available';
 export type RoadmapProgressStatus = 'not_started' | 'in_progress' | 'mastered';
@@ -191,6 +192,8 @@ export interface IRoadmapLessonResponse {
   locked: boolean;
   /** Источники узла (темы книг разных классов) — для трассируемости консолидированного урока */
   sources: IRoadmapLessonSource[];
+  /** Resolved-сайдкар: ассеты source-тем узла (payload для токенов ```asset id=```). */
+  assets?: IContentAsset[];
 }
 
 /** Элемент списка предметов для bottom sheet (согласован с GET /roadmaps/personal) */

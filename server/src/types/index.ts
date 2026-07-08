@@ -6,13 +6,13 @@ export enum UserRole {
   USER = 'user',
   /** Учитель: декомпозиция книг + маппинг на КТП. Эталон КТП и управление — за ADMIN. */
   TEACHER = 'teacher',
-  ADMIN = 'admin'
+  ADMIN = 'admin',
 }
 
 export enum Difficulty {
   EASY = 'easy',
   MEDIUM = 'medium',
-  HARD = 'hard'
+  HARD = 'hard',
 }
 
 // ==================== CONTENT STRUCTURE ====================
@@ -35,6 +35,44 @@ export interface IParagraph {
   content: IContent;
 }
 
+export type AssetKind = 'table' | 'image' | 'formula' | 'problem';
+
+export interface IAssetEnrichment {
+  version: number;
+  model?: string;
+  generatedAt: Date;
+  status: string;
+}
+
+export interface IContentAsset {
+  _id?: Types.ObjectId;
+  kind: AssetKind;
+  caption?: string;
+  pages?: number[];
+  enrichment?: IAssetEnrichment;
+  embedding?: number[];
+  columns?: string[];
+  rows?: string[][];
+  llmSummary?: string;
+  url?: string;
+  webpUrl?: string;
+  alt?: string;
+  width?: number;
+  height?: number;
+  pixelDependent?: boolean;
+  llmDescription?: string;
+  ocrText?: string;
+  latex?: string;
+  display?: boolean;
+  imageUrl?: string;
+  plainText?: string;
+  promptMarkdown?: string;
+  answer?: string;
+  solutionMarkdown?: string;
+}
+
+export type INewContentAsset = Omit<IContentAsset, '_id' | 'enrichment' | 'embedding'>;
+
 export interface ITopic {
   _id?: Types.ObjectId;
   title: string;
@@ -43,6 +81,8 @@ export interface ITopic {
   /** Темы КТП (KtpCatalog.topics._id), на которые замаплена эта тема книги. M:N. */
   ktpTopicIds?: Types.ObjectId[];
   paragraphs: IParagraph[];
+  /** Переиспользуемые ассеты темы (таблицы/изображения/формулы/задачи). */
+  assets?: IContentAsset[];
 }
 
 export interface IChapter {
@@ -147,6 +187,8 @@ export interface IRelatedContent {
   pages: number[];
   /** Временное поле от LLM до resolveTopicTitleToId */
   topicTitle?: string;
+  /** Ссылки на ContentAsset (Topic.assets._id), которые цитирует вопрос. */
+  assetIds?: string[];
 }
 
 /** Типы заданий в духе форматов ЕНТ (Казахстан) */
