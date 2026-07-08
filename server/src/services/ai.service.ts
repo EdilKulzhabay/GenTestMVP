@@ -3,11 +3,12 @@ import {
   IGeneratedTest,
   IQuestion,
   IAIFeedback,
+  IAssetCandidate,
   IContentForAI,
   IUserAnswer,
   IMistake,
   TestGenerationProfile,
-  EntQuestionType
+  EntQuestionType,
 } from '../types';
 import {
   parseAndValidateEntQuestions,
@@ -15,7 +16,7 @@ import {
   parseRegularQuestionsLenient,
   parseEntQuestionsLenient,
   formatExpectedAnswer,
-  summarizeUserAnswer
+  summarizeUserAnswer,
 } from '../utils/entQuestion.util';
 import { extractFirstJsonObject } from '../utils/jsonExtract.util';
 import { AppError } from '../utils';
@@ -37,7 +38,7 @@ const KC_TYPE_RULES: Record<EntQuestionType, string> = {
   short_answer:
     'short_answer — короткий однозначный ответ (число/слово/термин). "acceptableAnswers": массив 1–4 эквивалентных форм (напр. "4","четыре"). Без options.',
   text_input:
-    'text_input — развёрнутый ответ. Задай проверку: "acceptableKeywords" (3–6 ключевых слов/фраз) или "referenceAnswer" (краткий образцовый ответ). Без options.'
+    'text_input — развёрнутый ответ. Задай проверку: "acceptableKeywords" (3–6 ключевых слов/фраз) или "referenceAnswer" (краткий образцовый ответ). Без options.',
 };
 
 /** Нормализуем запрошенный микс типов к ровному count (по умолчанию — все single_choice). */
@@ -47,20 +48,20 @@ function normalizeKcTypeMix(
 ): Array<{ type: EntQuestionType; n: number }> {
   const entries = Object.entries(typeMix ?? {})
     .map(([t, n]) => ({ type: t as EntQuestionType, n: Math.max(0, Math.floor(Number(n) || 0)) }))
-    .filter((e) => e.n > 0);
+    .filter(e => e.n > 0);
   const total = entries.reduce((s, e) => s + e.n, 0);
   if (total === 0) return [{ type: 'single_choice', n: count }];
   // подгоняем сумму к count, добавляя/убавляя в крупнейшем бакете
   let diff = count - total;
   entries.sort((a, b) => b.n - a.n);
   while (diff !== 0 && entries.length) {
-    const i = diff > 0 ? 0 : entries.findIndex((e) => e.n > 0);
+    const i = diff > 0 ? 0 : entries.findIndex(e => e.n > 0);
     if (i < 0) break;
     entries[i].n += diff > 0 ? 1 : -1;
     diff += diff > 0 ? -1 : 1;
     entries.sort((a, b) => b.n - a.n);
   }
-  return entries.filter((e) => e.n > 0);
+  return entries.filter(e => e.n > 0);
 }
 
 function pickQuestionsArray(parsed: Record<string, unknown>): unknown[] | null {
@@ -74,14 +75,46 @@ function pickQuestionsArray(parsed: Record<string, unknown>): unknown[] | null {
   return null;
 }
 
+const ASSET_CATALOG_MAX = 50;
+
+/** Секция промпта с каталогом ассетов in-scope тем (LLM-B). Пусто, если кандидатов нет. */
+function assetCatalogLines(candidates?: IAssetCandidate[]): string[] {
+  if (!candidates?.length) return [];
+  const shown = candidates.slice(0, ASSET_CATALOG_MAX);
+  const lines = shown.map(
+    c =>
+      `- id=${c.assetId} [${c.kind}]${c.topicTitle ? ` (тема: ${c.topicTitle})` : ''}: ${c.label}`
+  );
+  const out = [
+    '',
+    'МАТЕРИАЛЫ ТЕМЫ (ассеты). Если вопрос прямо опирается на конкретную таблицу/изображение/формулу/задачу из списка ниже, добавь в его relatedContent поле "assetIds": ["<id>", ...] — используй ТОЛЬКО id из этого списка, не выдумывай. Если вопрос не опирается на материал — не добавляй assetIds.',
+    ...lines,
+  ];
+  if (candidates.length > ASSET_CATALOG_MAX) {
+    out.push(`- (…ещё ${candidates.length - ASSET_CATALOG_MAX} материалов не показаны)`);
+  }
+  return out;
+}
+
+/** Защитный фильтр (анти-галлюцинация): оставляем только assetIds из набора кандидатов. */
+function guardAssetIds(questions: IQuestion[], candidates?: IAssetCandidate[]): void {
+  const allowed = new Set((candidates ?? []).map(c => c.assetId));
+  for (const q of questions) {
+    const ids = q.relatedContent?.assetIds;
+    if (!ids?.length) continue;
+    const filtered = [...new Set(ids.map(String).filter(id => allowed.has(id)))];
+    q.relatedContent = { ...q.relatedContent, assetIds: filtered.length ? filtered : undefined };
+  }
+}
+
 /**
  * AI SERVICE (MOCK)
  * Сервис для работы с AI (сейчас mock, готов к интеграции с OpenAI/LLM)
- * 
+ *
  * Текущая реализация:
  * - Генерирует mock вопросы на основе контента
  * - Анализирует ответы и создает обратную связь
- * 
+ *
  * Для production:
  * 1. Заменить mock логику на вызовы OpenAI API
  * 2. Использовать промпты для генерации качественных вопросов
@@ -92,12 +125,12 @@ function pickQuestionsArray(parsed: Record<string, unknown>): unknown[] | null {
 class AIService {
   /**
    * Генерация теста на основе контента
-   * 
+   *
    * @param content - текстовый контент для генерации вопросов
    * @param metadata - метаданные о контенте (книга, глава и т.д.)
    * @param previousQuestions - хеши ранее сгенерированных вопросов для избежания повторений
    * @returns Сгенерированный тест с 10 вопросами
-   * 
+   *
    * TODO: Интегрировать с OpenAI API
    * Пример промпта:
    * "Generate 10 multiple-choice questions based on the following text.
@@ -130,8 +163,7 @@ class AIService {
       }
     }
 
-    const expectedN =
-      profile === 'regular' ? Math.min(50, Math.max(1, qc ?? 10)) : 10;
+    const expectedN = profile === 'regular' ? Math.min(50, Math.max(1, qc ?? 10)) : 10;
 
     const sourceContentHash = this.computeTestContentHash(content.text, profile, qc);
 
@@ -167,11 +199,13 @@ class AIService {
       '- relatedContent: { "pages": [числа], "topicTitle"?: "..." } — pages обязателен (можно приблизительно).',
       topicsList,
       '- Если в контенте есть формулы LaTeX ($...$ или $$...$$), сохраняй их в текстах.',
-      _previousQuestions.length > 0 ? `- Избегай повторения смысла этих вопросов: ${_previousQuestions.join(' | ')}` : '',
+      _previousQuestions.length > 0
+        ? `- Избегай повторения смысла этих вопросов: ${_previousQuestions.join(' | ')}`
+        : '',
       '',
       `КРИТИЧНО: массив questions ОБЯЗАТЕЛЬНО ровно из ${regularN} элементов. Не ${regularN - 1}, не ${
         regularN + 1
-      } — ровно ${regularN}.`
+      } — ровно ${regularN}.`,
     ].join('\n');
 
     const entSpec = [
@@ -193,14 +227,17 @@ class AIService {
       '- relatedContent: { "pages": [числа], "topicTitle"?: "..." } — pages обязателен (можно приблизительно).',
       topicsList,
       '- Если в контенте есть формулы LaTeX ($...$ или $$...$$), сохраняй их в текстах.',
-      _previousQuestions.length > 0 ? `- Избегай повторения смысла этих вопросов: ${_previousQuestions.join(' | ')}` : '',
+      _previousQuestions.length > 0
+        ? `- Избегай повторения смысла этих вопросов: ${_previousQuestions.join(' | ')}`
+        : '',
       '',
-      'КРИТИЧНО: массив questions ОБЯЗАТЕЛЬНО ровно из 10 элементов (индексы 0–9). Не 9, не 11 — только 10.'
+      'КРИТИЧНО: массив questions ОБЯЗАТЕЛЬНО ровно из 10 элементов (индексы 0–9). Не 9, не 11 — только 10.',
     ].join('\n');
 
     const specBody = profile === 'regular' ? regularSpec : entSpec;
     const prompt = [
       specBody,
+      ...assetCatalogLines(content.assetCandidates),
       '',
       'Требования:',
       groundingRule,
@@ -208,22 +245,20 @@ class AIService {
       topicFocusHint,
       '',
       'Контент для генерации:',
-      content.text
+      content.text,
     ]
       .filter(Boolean)
       .join('\n');
 
-    const contentPreview = content.text.length > 800
-      ? `${content.text.slice(0, 800)}...`
-      : content.text;
+    const contentPreview =
+      content.text.length > 800 ? `${content.text.slice(0, 800)}...` : content.text;
 
     const systemContent =
       profile === 'regular'
         ? `Ты составляешь обычные тесты по учебнику: ровно ${expectedN} вопросов с четырьмя вариантами и одним верным ответом. Ответь одним JSON-объектом с ключом questions; без Markdown и без текста вне JSON.`
         : 'Ты генерируешь проверочные задания по учебному контенту в форматах, приближённых к ЕНТ (Казахстан): один и несколько верных ответов, сопоставление, короткий и развёрнутый ответ. Ответь одним JSON-объектом с ключом questions — массив из ровно 10 элементов; без Markdown и без текста вне JSON.';
 
-    const max_tokens =
-      profile === 'regular' ? Math.min(12000, 1500 + expectedN * 500) : 16000;
+    const max_tokens = profile === 'regular' ? Math.min(12000, 1500 + expectedN * 500) : 16000;
 
     console.log('🤖 [AI] generateTest:start', {
       model: 'gpt-4o-mini',
@@ -234,7 +269,7 @@ class AIService {
       topicsCount: content.metadata.topics.length,
       contentChars: content.text.length,
       contentHash: sourceContentHash,
-      previousQuestionsCount: _previousQuestions.length
+      previousQuestionsCount: _previousQuestions.length,
     });
     console.log('🤖 [AI] prompt:begin');
     console.log(prompt);
@@ -244,18 +279,26 @@ class AIService {
     type ChatMsg = { role: 'system' | 'user' | 'assistant'; content: string };
     const chatMessages: ChatMsg[] = [
       { role: 'system', content: systemContent },
-      { role: 'user', content: prompt }
+      { role: 'user', content: prompt },
     ];
 
     let questions: IQuestion[] | undefined;
 
     for (let attempt = 0; attempt < 2; attempt++) {
-      const raw = await this.openAiJsonCompletion(apiKey, chatMessages, max_tokens, attempt === 0 ? 0.45 : 0.2);
+      const raw = await this.openAiJsonCompletion(
+        apiKey,
+        chatMessages,
+        max_tokens,
+        attempt === 0 ? 0.45 : 0.2
+      );
       console.log('🤖 [AI] response:raw', raw);
 
       const jsonStr = extractFirstJsonObject(raw);
       if (!jsonStr) {
-        console.error('🤖 [AI] response:parse-error', { attempt: attempt + 1, rawPreview: raw.slice(0, 500) });
+        console.error('🤖 [AI] response:parse-error', {
+          attempt: attempt + 1,
+          rawPreview: raw.slice(0, 500),
+        });
         if (attempt === 1) {
           throw new Error('OpenAI response does not contain a parseable JSON object.');
         }
@@ -263,7 +306,7 @@ class AIService {
           { role: 'assistant', content: raw },
           {
             role: 'user',
-            content: `Ответ не удалось разобрать как JSON-объект. Верни один JSON-объект с ключом questions (массив из ровно ${expectedN} элементов), без текста до или после.`
+            content: `Ответ не удалось разобрать как JSON-объект. Верни один JSON-объект с ключом questions (массив из ровно ${expectedN} элементов), без текста до или после.`,
           }
         );
         continue;
@@ -279,7 +322,11 @@ class AIService {
         }
         chatMessages.push(
           { role: 'assistant', content: raw },
-          { role: 'user', content: 'JSON синтаксически неверен. Исправь и верни один корректный JSON-объект с ключом questions.' }
+          {
+            role: 'user',
+            content:
+              'JSON синтаксически неверен. Исправь и верни один корректный JSON-объект с ключом questions.',
+          }
         );
         continue;
       }
@@ -288,7 +335,7 @@ class AIService {
       if (!rawQuestions) {
         console.error('🤖 [AI] response:no-questions-array', {
           attempt: attempt + 1,
-          keys: Object.keys(parsed)
+          keys: Object.keys(parsed),
         });
         if (attempt === 1) {
           throw new Error('OpenAI JSON must contain root key "questions" (array).');
@@ -297,7 +344,7 @@ class AIService {
           { role: 'assistant', content: raw },
           {
             role: 'user',
-            content: `В JSON нет массива questions в корне. Верни объект вида {"questions":[ ... ]} с ровно ${expectedN} вопросами.`
+            content: `В JSON нет массива questions в корне. Верни объект вида {"questions":[ ... ]} с ровно ${expectedN} вопросами.`,
           }
         );
         continue;
@@ -332,7 +379,7 @@ class AIService {
           attempt: attempt + 1,
           profile,
           error: e,
-          questionsCount: n
+          questionsCount: n,
         });
         if (attempt === 1) {
           throw e instanceof Error ? e : new Error('Invalid questions from model.');
@@ -343,7 +390,7 @@ class AIService {
             role: 'user',
             content: `Массив из ${expectedN} элементов есть, но проверка не прошла: ${
               e instanceof Error ? e.message : String(e)
-            }. Исправь структуру каждого вопроса и верни полный JSON с questions (ровно ${expectedN} элементов).`
+            }. Исправь структуру каждого вопроса и верни полный JSON с questions (ровно ${expectedN} элементов).`,
           }
         );
       }
@@ -358,6 +405,7 @@ class AIService {
         question.relatedContent = { ...question.relatedContent, pages: [1] };
       }
     }
+    guardAssetIds(questions, content.assetCandidates);
 
     console.log('🤖 [AI] generateTest:done', { questionsCount: questions.length });
     return { questions, sourceContentHash };
@@ -379,16 +427,12 @@ class AIService {
         batches > 1 && b > 0
           ? {
               ...content,
-              text:
-                `${content.text}\n\n(Продолжение: серия ${b + 1} из ${batches}, по 10 вопросов в формате ЕНТ. Не повторяй смыслы вопросов из предыдущих серий; опирайся на другие разделы и факты учебного материала.)`
+              text: `${content.text}\n\n(Продолжение: серия ${b + 1} из ${batches}, по 10 вопросов в формате ЕНТ. Не повторяй смыслы вопросов из предыдущих серий; опирайся на другие разделы и факты учебного материала.)`,
             }
           : content;
       const part = await this.generateTest(paddedContent, prev, 'ent');
       all.push(...part.questions);
-      prev = [
-        ...prev,
-        ...part.questions.map((q) => Buffer.from(q.questionText).toString('base64'))
-      ];
+      prev = [...prev, ...part.questions.map(q => Buffer.from(q.questionText).toString('base64'))];
     }
     for (const question of all) {
       if (!question.relatedContent?.pages?.length) {
@@ -413,16 +457,21 @@ class AIService {
     count: number;
     difficulty: number;
     typeMix?: Partial<Record<EntQuestionType, number>>;
+    assetCandidates?: IAssetCandidate[];
   }): Promise<IQuestion[]> {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) throw new Error('OPENAI_API_KEY is not defined.');
 
     const count = Math.min(10, Math.max(1, input.count));
-    const body = input.sourceText.length > 14000 ? `${input.sourceText.slice(0, 14000)}\n[обрезано]` : input.sourceText;
+    const body =
+      input.sourceText.length > 14000
+        ? `${input.sourceText.slice(0, 14000)}\n[обрезано]`
+        : input.sourceText;
     const langRule = input.language?.trim()
       ? `Язык вопросов/вариантов/пояснений: ${input.language.trim()}.`
       : 'Язык — как у текста источника.';
-    const diffWord = input.difficulty <= 2 ? 'базовая' : input.difficulty >= 4 ? 'повышенная' : 'средняя';
+    const diffWord =
+      input.difficulty <= 2 ? 'базовая' : input.difficulty >= 4 ? 'повышенная' : 'средняя';
 
     const mix = normalizeKcTypeMix(input.typeMix, count);
     const isMixed = mix.length > 1 || mix[0].type !== 'single_choice';
@@ -434,7 +483,7 @@ class AIService {
       '- Опирайся ИСКЛЮЧИТЕЛЬНО на текст источника ниже. НЕ добавляй фактов, которых там нет.',
       '- Каждый вопрос строго в рамках указанной подтемы; правильный ответ однозначно следует из источника.',
       '- questionText — законченный вопрос-предложение (не короче 15 символов), без сокращений.',
-      '- aiExplanation: 1–2 предложения. relatedContent: { "pages": [числа] } (можно приблизительно).'
+      '- aiExplanation: 1–2 предложения. relatedContent: { "pages": [числа] } (можно приблизительно).',
     ];
 
     const prompt = isMixed
@@ -442,15 +491,16 @@ class AIService {
           `Сгенерируй ровно ${count} проверочных вопросов СМЕШАННЫХ типов по ОДНОЙ подтеме.`,
           ...common,
           'Состав по типам (создай ровно столько каждого типа):',
-          ...mix.map((m) => `- ${m.type}: ${m.n}`),
+          ...mix.map(m => `- ${m.type}: ${m.n}`),
           '- В каждом вопросе явно укажи "questionType".',
           'Форматы полей по типам:',
-          ...mix.map((m) => `- ${KC_TYPE_RULES[m.type]}`),
+          ...mix.map(m => `- ${KC_TYPE_RULES[m.type]}`),
           langRule,
+          ...assetCatalogLines(input.assetCandidates),
           `Формат ответа: один JSON-объект {"questions":[ ... ровно ${count} ... ]} без Markdown.`,
           '',
           'Текст источника:',
-          body
+          body,
         ].join('\n')
       : [
           `Сгенерируй ровно ${count} проверочных вопросов (single_choice) по ОДНОЙ подтеме.`,
@@ -459,18 +509,28 @@ class AIService {
           '- Дистракторы (неверные варианты): правдоподобные, из той же темы/текста, сопоставимой длины и стиля с верным; все 4 варианта различны; ровно один однозначно верный.',
           '- Запрещены варианты-«ловушки» вида «всё перечисленное», «нет верного ответа», «оба варианта».',
           langRule,
+          ...assetCatalogLines(input.assetCandidates),
           `Формат ответа: один JSON-объект {"questions":[ ... ровно ${count} ... ]} без Markdown.`,
           '',
           'Текст источника:',
-          body
+          body,
         ].join('\n');
 
     const messages = [
-      { role: 'system' as const, content: 'Ты составляешь тестовые задания строго по переданному фрагменту. Ответ — строгий JSON с ключом questions.' },
-      { role: 'user' as const, content: prompt }
+      {
+        role: 'system' as const,
+        content:
+          'Ты составляешь тестовые задания строго по переданному фрагменту. Ответ — строгий JSON с ключом questions.',
+      },
+      { role: 'user' as const, content: prompt },
     ];
 
-    const raw = await this.openAiJsonCompletion(apiKey, messages, Math.min(8000, 1400 + count * 500), 0.4);
+    const raw = await this.openAiJsonCompletion(
+      apiKey,
+      messages,
+      Math.min(8000, 1400 + count * 500),
+      0.4
+    );
     const jsonStr = extractFirstJsonObject(raw);
     if (!jsonStr) throw new Error('generateKcQuestions: no JSON in response');
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
@@ -481,6 +541,7 @@ class AIService {
     for (const q of questions) {
       if (!q.relatedContent?.pages?.length) q.relatedContent = { ...q.relatedContent, pages: [1] };
     }
+    guardAssetIds(questions, input.assetCandidates);
     return questions;
   }
 
@@ -488,17 +549,23 @@ class AIService {
    * Верификация вопроса банка (LLM-judge, анти-галлюцинации):
    * корректен ли заявленный правильный ответ и однозначно ли он следует из источника.
    */
-  async verifyQuestionItem(input: { question: IQuestion; sourceText: string }): Promise<{ ok: boolean; reason?: string }> {
+  async verifyQuestionItem(input: {
+    question: IQuestion;
+    sourceText: string;
+  }): Promise<{ ok: boolean; reason?: string }> {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return { ok: true }; // без ключа верификацию не делаем (не блокируем поток)
 
     const q = input.question;
-    const body = input.sourceText.length > 12000 ? `${input.sourceText.slice(0, 12000)}\n[обрезано]` : input.sourceText;
+    const body =
+      input.sourceText.length > 12000
+        ? `${input.sourceText.slice(0, 12000)}\n[обрезано]`
+        : input.sourceText;
     const correct = formatExpectedAnswer(q) || q.correctOption || '';
     const matchingCtx =
       q.matchingLeft?.length && q.matchingRight?.length
-        ? `Левый столбец: ${q.matchingLeft.map((x) => `${x.id}:${x.text}`).join(' | ')}\nПравый столбец: ${q.matchingRight
-            .map((x) => `${x.id}:${x.text}`)
+        ? `Левый столбец: ${q.matchingLeft.map(x => `${x.id}:${x.text}`).join(' | ')}\nПравый столбец: ${q.matchingRight
+            .map(x => `${x.id}:${x.text}`)
             .join(' | ')}`
         : '';
     const prompt = [
@@ -518,7 +585,7 @@ class AIService {
       `Заявленный правильный ответ: ${correct}`,
       '',
       'Текст источника:',
-      body
+      body,
     ]
       .filter(Boolean)
       .join('\n');
@@ -527,8 +594,11 @@ class AIService {
       const raw = await this.openAiJsonCompletion(
         apiKey,
         [
-          { role: 'system', content: 'Ты строгий рецензент тестовых заданий. Отвечай строгим JSON.' },
-          { role: 'user', content: prompt }
+          {
+            role: 'system',
+            content: 'Ты строгий рецензент тестовых заданий. Отвечай строгим JSON.',
+          },
+          { role: 'user', content: prompt },
         ],
         400,
         0.0
@@ -538,7 +608,7 @@ class AIService {
       const parsed = JSON.parse(jsonStr) as { ok?: unknown; reason?: unknown };
       return {
         ok: parsed.ok === true,
-        ...(typeof parsed.reason === 'string' ? { reason: parsed.reason } : {})
+        ...(typeof parsed.reason === 'string' ? { reason: parsed.reason } : {}),
       };
     } catch (e) {
       console.warn('[AI] verifyQuestionItem failed', e);
@@ -553,7 +623,7 @@ class AIService {
    * @param userAnswers - ответы пользователя
    * @param content - контент для ссылок на материал
    * @returns AI обратная связь с анализом ошибок
-   * 
+   *
    * TODO: Интегрировать с OpenAI для персонализированной обратной связи
    * Пример промпта:
    * "Analyze the student's answers and provide personalized feedback.
@@ -588,7 +658,7 @@ class AIService {
       if (!userAnswer.isCorrect) {
         const mistake: IMistake = {
           question: userAnswer.question,
-          explanation: `Ваш ответ: ${summarizeUserAnswer(userAnswer.selectedOption)}. Ожидается: ${correctAnswer.correctSummary}. ${correctAnswer.explanation}`
+          explanation: `Ваш ответ: ${summarizeUserAnswer(userAnswer.selectedOption)}. Ожидается: ${correctAnswer.correctSummary}. ${correctAnswer.explanation}`,
         };
         if (contentMetadata.bookTitle?.trim()) {
           const rcPages = correctAnswer.relatedContent?.pages;
@@ -597,7 +667,7 @@ class AIService {
             bookTitle: contentMetadata.bookTitle,
             chapterTitle: contentMetadata.chapterTitle || 'Вся книга',
             pages,
-            topicTitle: correctAnswer.relatedContent?.topicTitle
+            topicTitle: correctAnswer.relatedContent?.topicTitle,
           };
         }
         mistakes.push(mistake);
@@ -606,7 +676,7 @@ class AIService {
 
     // Генерируем общий вывод
     let summary = '';
-    
+
     if (scorePercent >= 90) {
       summary = `Отличная работа! Вы ответили правильно на ${correctCount} из ${totalCount} вопросов (${scorePercent}%). Вы демонстрируете отличное понимание материала по теме "${contentMetadata.bookTitle}".`;
     } else if (scorePercent >= 70) {
@@ -623,19 +693,19 @@ class AIService {
 
     return {
       summary,
-      mistakes
+      mistakes,
     };
   }
 
   /**
    * Перефразирование вопроса для избежания повторений
    * Используется когда вопрос уже задавался ранее
-   * 
+   *
    * TODO: Интегрировать с OpenAI
    */
   async rephraseQuestion(originalQuestion: string): Promise<string> {
     await this.delay(300);
-    
+
     // Mock перефразирование
     return `[Перефразировано] ${originalQuestion}`;
   }
@@ -654,15 +724,15 @@ class AIService {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         temperature,
         max_tokens,
         response_format: { type: 'json_object' },
-        messages
-      })
+        messages,
+      }),
     });
 
     if (!response.ok) {
@@ -700,10 +770,7 @@ class AIService {
    * Создание хеша контента для кеширования тестов
    */
   private hashContent(content: string): string {
-    return crypto
-      .createHash('sha256')
-      .update(content)
-      .digest('hex');
+    return crypto.createHash('sha256').update(content).digest('hex');
   }
 
   /**
@@ -735,22 +802,22 @@ export const aiService = new AIService();
 
 /**
  * INTEGRATION GUIDE для замены на реальный AI:
- * 
+ *
  * 1. Установить OpenAI SDK:
  *    npm install openai
- * 
+ *
  * 2. Добавить в .env:
  *    OPENAI_API_KEY=your_api_key
- * 
+ *
  * 3. Заменить методы generateTest и analyzeAnswers:
- * 
+ *
  * import { Configuration, OpenAIApi } from 'openai';
- * 
+ *
  * const configuration = new Configuration({
  *   apiKey: process.env.OPENAI_API_KEY,
  * });
  * const openai = new OpenAIApi(configuration);
- * 
+ *
  * async generateTest(content, previousQuestions) {
  *   const response = await openai.createChatCompletion({
  *     model: "gpt-4",
@@ -763,7 +830,7 @@ export const aiService = new AIService();
  *     }],
  *     temperature: 0.7,
  *   });
- *   
+ *
  *   return JSON.parse(response.data.choices[0].message.content);
  * }
  */

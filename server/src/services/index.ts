@@ -14,4 +14,5 @@ export { ktpService } from './ktp.service';
 export { knowledgeComponentService } from './knowledgeComponent.service';
 export { questionBankService } from './questionBank.service';
 export { userKcMasteryService } from './userKcMastery.service';
-export { resolveBookContentForAI } from './subjectContent.service';
+export { resolveBookContentForAI, resolveTestAssets } from './subjectContent.service';
+export { describeImageAsset, enrichImageAssetInBackground } from './asset.ai.service';

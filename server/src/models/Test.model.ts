@@ -5,18 +5,19 @@ import { ENT_QUESTION_TYPES, validateEntQuestion } from '../utils/entQuestion.ut
 const RelatedContentSchema = new Schema<IRelatedContent>(
   {
     chapterId: {
-      type: Schema.Types.ObjectId
+      type: Schema.Types.ObjectId,
     },
     topicId: {
-      type: Schema.Types.ObjectId
+      type: Schema.Types.ObjectId,
     },
     pages: [
       {
         type: Number,
-        required: true
-      }
+        required: true,
+      },
     ],
-    topicTitle: { type: String, trim: true }
+    topicTitle: { type: String, trim: true },
+    assetIds: [{ type: String }],
   },
   { _id: false }
 );
@@ -24,7 +25,7 @@ const RelatedContentSchema = new Schema<IRelatedContent>(
 const MatchingItemSchema = new Schema<IMatchingItem>(
   {
     id: { type: String, required: true, trim: true },
-    text: { type: String, required: true, trim: true }
+    text: { type: String, required: true, trim: true },
   },
   { _id: false }
 );
@@ -34,14 +35,14 @@ const QuestionSchema = new Schema<IQuestion>(
     questionType: {
       type: String,
       enum: [...ENT_QUESTION_TYPES],
-      default: 'single_choice'
+      default: 'single_choice',
     },
     questionText: {
       type: String,
       required: true,
       trim: true,
       minlength: 5,
-      maxlength: 2000
+      maxlength: 2000,
     },
     options: [{ type: String, trim: true }],
     correctOption: { type: String, trim: true },
@@ -56,15 +57,15 @@ const QuestionSchema = new Schema<IQuestion>(
       type: String,
       required: true,
       trim: true,
-      maxlength: 1200
+      maxlength: 1200,
     },
     relatedContent: {
       type: RelatedContentSchema,
-      required: true
+      required: true,
     },
     /** Банк (Фаза 2/3): id item банка и покрытые KC — для статистики/SR/пер-KC mastery */
     questionItemId: { type: Schema.Types.ObjectId },
-    knowledgeComponentIds: { type: [String], default: undefined }
+    knowledgeComponentIds: { type: [String], default: undefined },
   },
   { _id: false }
 );
@@ -77,53 +78,50 @@ const TestSchema = new Schema<ITestDocument>(
       type: Schema.Types.ObjectId,
       ref: 'Subject',
       required: true,
-      index: true
+      index: true,
     },
     bookId: {
       type: Schema.Types.ObjectId,
       required: true,
-      index: true
+      index: true,
     },
     chapterId: {
       type: Schema.Types.ObjectId,
-      index: true
+      index: true,
     },
     questions: [QuestionSchema],
     sourceContentHash: {
       type: String,
       required: true,
-      index: true
+      index: true,
     },
     testProfile: {
       type: String,
       enum: ['regular', 'ent'],
-      default: 'ent'
-    }
+      default: 'ent',
+    },
   },
   {
     timestamps: true,
-    collection: 'tests'
+    collection: 'tests',
   }
 );
 
 TestSchema.index({ subjectId: 1, bookId: 1, chapterId: 1, sourceContentHash: 1, testProfile: 1 });
 TestSchema.index({ createdAt: -1 });
 
-TestSchema.path('questions').validate(
-  (questions: IQuestion[]) => {
-    // Размер теста переменный (regular/ent/банк): валидируем диапазон + корректность каждого вопроса.
-    if (!Array.isArray(questions) || questions.length < 1 || questions.length > 120) return false;
-    try {
-      questions.forEach((q, i) => {
-        validateEntQuestion(q as unknown, i);
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  },
-  'Тест должен содержать 1–120 корректных вопросов в формате ЕНТ'
-);
+TestSchema.path('questions').validate((questions: IQuestion[]) => {
+  // Размер теста переменный (regular/ent/банк): валидируем диапазон + корректность каждого вопроса.
+  if (!Array.isArray(questions) || questions.length < 1 || questions.length > 120) return false;
+  try {
+    questions.forEach((q, i) => {
+      validateEntQuestion(q as unknown, i);
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}, 'Тест должен содержать 1–120 корректных вопросов в формате ЕНТ');
 
 TestSchema.statics.findCachedTest = async function (
   subjectId: string,
@@ -134,7 +132,7 @@ TestSchema.statics.findCachedTest = async function (
   const query: Record<string, unknown> = {
     subjectId,
     bookId,
-    sourceContentHash
+    sourceContentHash,
   };
 
   if (chapterId) {

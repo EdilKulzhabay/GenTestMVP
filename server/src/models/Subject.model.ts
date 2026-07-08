@@ -7,14 +7,14 @@ import {
   IParagraph,
   IContent,
   IMetadata,
-  Difficulty
+  Difficulty,
 } from '../types';
 
 /**
  * SUBJECT MODEL
  * Корневая модель для иерархической структуры образовательного контента
  * Содержит: Subject -> Book -> Chapter -> Topic -> Paragraph -> Content
- * 
+ *
  * Оптимизация: Использую вложенные схемы (embedded documents) вместо ссылок,
  * так как контент всегда читается целиком для генерации тестов.
  * Это уменьшает количество запросов к БД.
@@ -22,99 +22,174 @@ import {
 
 // ==================== SUB-SCHEMAS ====================
 
-const MetadataSchema = new Schema<IMetadata>({
-  keywords: [{ type: String }],
-  difficulty: { 
-    type: String, 
-    enum: Object.values(Difficulty),
-    required: false 
+const MetadataSchema = new Schema<IMetadata>(
+  {
+    keywords: [{ type: String }],
+    difficulty: {
+      type: String,
+      enum: Object.values(Difficulty),
+      required: false,
+    },
+    source: { type: String },
   },
-  source: { type: String }
-}, { _id: false });
+  { _id: false }
+);
 
-const ContentSchema = new Schema<IContent>({
-  text: { 
-    type: String, 
-    required: true,
-    trim: true,
-    minlength: 1
+const ContentSchema = new Schema<IContent>(
+  {
+    text: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 1,
+    },
+    pages: [
+      {
+        type: Number,
+        required: true,
+      },
+    ],
+    metadata: {
+      type: MetadataSchema,
+      required: true,
+    },
   },
-  pages: [{ 
-    type: Number, 
-    required: true 
-  }],
-  metadata: { 
-    type: MetadataSchema, 
-    required: true 
-  }
-}, { _id: false });
+  { _id: false }
+);
 
-const ParagraphSchema = new Schema<IParagraph>({
-  order: { 
-    type: Number, 
-    required: true,
-    min: 0
+const ParagraphSchema = new Schema<IParagraph>(
+  {
+    order: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    content: {
+      type: ContentSchema,
+      required: true,
+    },
   },
-  content: { 
-    type: ContentSchema, 
-    required: true 
-  }
-}, { timestamps: false });
+  { timestamps: false }
+);
 
-const TopicSchema = new Schema<ITopic>({
-  title: {
-    type: String,
-    required: true,
-    trim: true,
-    minlength: 1,
-    maxlength: 200
+/** Мета обогащения ассета (llmDescription/проекции) — leaf value object без _id. */
+const EnrichmentSchema = new Schema(
+  {
+    version: { type: Number, required: true },
+    model: { type: String },
+    generatedAt: { type: Date },
+    status: { type: String },
   },
-  /** Порядок темы в главе (drag-and-drop). Необязателен для старых данных. */
-  order: {
-    type: Number,
-    min: 0
-  },
-  /** Темы КТП (KtpCatalog.topics._id), на которые замаплена эта тема книги. M:N. */
-  ktpTopicIds: [{ type: Schema.Types.ObjectId }],
-  paragraphs: [ParagraphSchema]
-}, { timestamps: false });
+  { _id: false }
+);
 
-const ChapterSchema = new Schema<IChapter>({
-  title: { 
-    type: String, 
-    required: true,
-    trim: true,
-    minlength: 1,
-    maxlength: 200
+/**
+ * ContentAsset — переиспользуемый элемент темы (таблица/изображение/формула/задача).
+ * Плоская схема с enum `kind` и опциональными пер-типными полями (без discriminator'ов).
+ * Default _id:true → сервер минтит ObjectId при push()+save() (как ParagraphSchema).
+ */
+const ContentAssetSchema = new Schema(
+  {
+    kind: {
+      type: String,
+      enum: ['table', 'image', 'formula', 'problem'],
+      required: true,
+    },
+    caption: { type: String },
+    pages: [{ type: Number }],
+    enrichment: { type: EnrichmentSchema },
+    embedding: [{ type: Number }],
+    // table
+    columns: [{ type: String }],
+    rows: [[String]],
+    llmSummary: { type: String },
+    // image
+    url: { type: String },
+    webpUrl: { type: String },
+    alt: { type: String },
+    width: { type: Number },
+    height: { type: Number },
+    pixelDependent: { type: Boolean },
+    llmDescription: { type: String },
+    ocrText: { type: String },
+    // formula
+    latex: { type: String },
+    display: { type: Boolean },
+    imageUrl: { type: String },
+    plainText: { type: String },
+    // problem
+    promptMarkdown: { type: String },
+    answer: { type: String },
+    solutionMarkdown: { type: String },
   },
-  order: { 
-    type: Number, 
-    required: true,
-    min: 0
-  },
-  topics: [TopicSchema]
-}, { timestamps: false });
+  { timestamps: false }
+);
 
-const BookSchema = new Schema<IBook>({
-  title: { 
-    type: String, 
-    required: true,
-    trim: true,
-    minlength: 1,
-    maxlength: 300
+const TopicSchema = new Schema<ITopic>(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 1,
+      maxlength: 200,
+    },
+    /** Порядок темы в главе (drag-and-drop). Необязателен для старых данных. */
+    order: {
+      type: Number,
+      min: 0,
+    },
+    /** Темы КТП (KtpCatalog.topics._id), на которые замаплена эта тема книги. M:N. */
+    ktpTopicIds: [{ type: Schema.Types.ObjectId }],
+    paragraphs: [ParagraphSchema],
+    /** Переиспользуемые ассеты темы (таблицы/изображения/формулы/задачи). */
+    assets: [ContentAssetSchema],
   },
-  author: { 
-    type: String,
-    trim: true,
-    maxlength: 200
+  { timestamps: false }
+);
+
+const ChapterSchema = new Schema<IChapter>(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 1,
+      maxlength: 200,
+    },
+    order: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    topics: [TopicSchema],
   },
-  contentLanguage: {
-    type: String,
-    trim: true,
-    maxlength: 80
+  { timestamps: false }
+);
+
+const BookSchema = new Schema<IBook>(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 1,
+      maxlength: 300,
+    },
+    author: {
+      type: String,
+      trim: true,
+      maxlength: 200,
+    },
+    contentLanguage: {
+      type: String,
+      trim: true,
+      maxlength: 80,
+    },
+    chapters: [ChapterSchema],
   },
-  chapters: [ChapterSchema]
-}, { timestamps: false });
+  { timestamps: false }
+);
 
 // ==================== MAIN SCHEMA ====================
 
@@ -125,33 +200,36 @@ type ISubjectDocument = Document &
     getTopicsContent(bookId: string, chapterId: string, topicIds: string[]): string;
   };
 
-const SubjectSchema = new Schema<ISubjectDocument>({
-  title: { 
-    type: String, 
-    required: true,
-    trim: true,
-    unique: true,
-    minlength: 1,
-    maxlength: 200,
-    index: true
+const SubjectSchema = new Schema<ISubjectDocument>(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+      unique: true,
+      minlength: 1,
+      maxlength: 200,
+      index: true,
+    },
+    description: {
+      type: String,
+      trim: true,
+      maxlength: 1000,
+    },
+    /** Основные предметы (общие) vs профильные (для выбора пары ЕНТ) */
+    subjectKind: {
+      type: String,
+      enum: ['main', 'profile'],
+      default: 'main',
+      index: true,
+    },
+    books: [BookSchema],
   },
-  description: { 
-    type: String,
-    trim: true,
-    maxlength: 1000
-  },
-  /** Основные предметы (общие) vs профильные (для выбора пары ЕНТ) */
-  subjectKind: {
-    type: String,
-    enum: ['main', 'profile'],
-    default: 'main',
-    index: true
-  },
-  books: [BookSchema]
-}, { 
-  timestamps: true,
-  collection: 'subjects'
-});
+  {
+    timestamps: true,
+    collection: 'subjects',
+  }
+);
 
 // ==================== INDEXES ====================
 // Индексы для быстрого поиска по вложенным структурам
@@ -165,10 +243,10 @@ SubjectSchema.index({ 'books.chapters.topics._id': 1 });
  * Метод для получения текста всей книги
  * Используется для генерации тестов по всей книге
  */
-SubjectSchema.methods.getBookContent = function(bookId: string): string {
+SubjectSchema.methods.getBookContent = function (bookId: string): string {
   const book = this.books.id(bookId);
   if (!book) return '';
-  
+
   return book.chapters
     .flatMap((chapter: IChapter) => chapter.topics)
     .flatMap((topic: ITopic) => topic.paragraphs)
@@ -180,13 +258,13 @@ SubjectSchema.methods.getBookContent = function(bookId: string): string {
  * Метод для получения текста конкретной главы
  * Используется для генерации тестов по главе
  */
-SubjectSchema.methods.getChapterContent = function(bookId: string, chapterId: string): string {
+SubjectSchema.methods.getChapterContent = function (bookId: string, chapterId: string): string {
   const book = this.books.id(bookId);
   if (!book) return '';
-  
+
   const chapter = book.chapters.id(chapterId);
   if (!chapter) return '';
-  
+
   return chapter.topics
     .flatMap((topic: ITopic) => topic.paragraphs)
     .map((paragraph: IParagraph) => paragraph.content.text)
@@ -197,13 +275,17 @@ SubjectSchema.methods.getChapterContent = function(bookId: string, chapterId: st
  * Метод для получения текста по выбранным темам
  * Используется для генерации тестов по конкретным темам
  */
-SubjectSchema.methods.getTopicsContent = function(bookId: string, chapterId: string, topicIds: string[]): string {
+SubjectSchema.methods.getTopicsContent = function (
+  bookId: string,
+  chapterId: string,
+  topicIds: string[]
+): string {
   const book = this.books.id(bookId);
   if (!book) return '';
-  
+
   const chapter = book.chapters.id(chapterId);
   if (!chapter) return '';
-  
+
   return chapter.topics
     .filter((topic: ITopic) => topicIds.includes(topic._id!.toString()))
     .flatMap((topic: ITopic) => topic.paragraphs)
@@ -213,4 +295,7 @@ SubjectSchema.methods.getTopicsContent = function(bookId: string, chapterId: str
 
 // ==================== MODEL ====================
 
-export const Subject: Model<ISubjectDocument> = mongoose.model<ISubjectDocument>('Subject', SubjectSchema);
+export const Subject: Model<ISubjectDocument> = mongoose.model<ISubjectDocument>(
+  'Subject',
+  SubjectSchema
+);

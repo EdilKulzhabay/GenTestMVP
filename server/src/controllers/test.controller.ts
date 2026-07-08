@@ -6,23 +6,24 @@ import {
   roadmapService,
   testResultService,
   questionBankService,
-  userKcMasteryService
+  userKcMasteryService,
 } from '../services';
-import { resolveBookContentForAI } from '../services/subjectContent.service';
+import { resolveBookContentForAI, resolveTestAssets } from '../services/subjectContent.service';
+import { collectTestAssets } from '../utils/roadmapChapter.util';
 import {
   IGenerateTestDTO,
   ISubmitTestDTO,
   IUserAnswer,
   ITestHistory,
   IQuestion,
-  TestGenerationProfile
+  TestGenerationProfile,
 } from '../types';
 import { success, AppError } from '../utils';
 import {
   formatExpectedAnswer,
   clientPrefillValueForQuestion,
   gradeAnswer,
-  sanitizeQuestionForClient
+  sanitizeQuestionForClient,
 } from '../utils/entQuestion.util';
 import { assertLearnerSubjectAccess } from '../utils/learnerSubjectAccess.util';
 import { computeTrialTopicMasteryRows } from '../utils/trialTopicMastery.util';
@@ -42,7 +43,7 @@ class TestController {
     const filter: Record<string, unknown> = {
       subjectId: dto.subjectId,
       bookId: dto.bookId,
-      sourceContentHash
+      sourceContentHash,
     };
     if (dto.chapterId) {
       filter.chapterId = dto.chapterId;
@@ -63,7 +64,9 @@ class TestController {
     profile: TestGenerationProfile,
     sourceContentHash: string
   ) {
-    return Test.findOne(this.buildExactCacheFilter(dto, profile, sourceContentHash)).sort({ createdAt: -1 });
+    return Test.findOne(this.buildExactCacheFilter(dto, profile, sourceContentHash)).sort({
+      createdAt: -1,
+    });
   }
 
   private buildDailyPackId(input: {
@@ -80,7 +83,7 @@ class TestController {
       input.chapterId || 'full-book',
       input.fullBook ? 'full' : 'chapter',
       input.testProfile,
-      input.dateKey
+      input.dateKey,
     ].join('|');
     return `daily-${createHash('sha1').update(raw).digest('hex').slice(0, 16)}`;
   }
@@ -106,7 +109,10 @@ class TestController {
   private calculateSoloQuestionScore(isCorrect: boolean, responseTimeMs?: number): number {
     if (!isCorrect) return 0;
     const limitMs = TestController.SOLO_QUESTION_TIME_LIMIT_SEC * 1000;
-    const safeMs = typeof responseTimeMs === 'number' && Number.isFinite(responseTimeMs) ? responseTimeMs : limitMs;
+    const safeMs =
+      typeof responseTimeMs === 'number' && Number.isFinite(responseTimeMs)
+        ? responseTimeMs
+        : limitMs;
     const remainingSec = Math.max(0, (limitMs - Math.max(0, safeMs)) / 1000);
     const score = 1000 * (0.3 + 0.7 * (remainingSec / TestController.SOLO_QUESTION_TIME_LIMIT_SEC));
     return Math.round(score);
@@ -128,7 +134,7 @@ class TestController {
           q.relatedContent = {
             ...q.relatedContent,
             topicId: topic._id,
-            chapterId: topic._chapterId
+            chapterId: topic._chapterId,
           };
         }
         delete q.relatedContent.topicTitle;
@@ -149,7 +155,7 @@ class TestController {
     if (dto.chapterId) {
       generatedTest.questions = generatedTest.questions.map((q: any) => ({
         ...q,
-        relatedContent: { ...q.relatedContent, chapterId: dto.chapterId as any }
+        relatedContent: { ...q.relatedContent, chapterId: dto.chapterId as any },
       }));
     }
 
@@ -166,58 +172,79 @@ class TestController {
       chapterId: dto.chapterId || undefined,
       questions: generatedTest.questions,
       sourceContentHash: generatedTest.sourceContentHash,
-      testProfile
+      testProfile,
     });
   }
 
-  /** Сформировать тест для клиента. Подсказки с эталоном — временно, см. SHOW_TEST_CORRECT_ANSWERS. */
-  private sanitize(test: any) {
-    const testProfile: TestGenerationProfile =
-      test.testProfile === 'regular' ? 'regular' : 'ent';
+  /**
+   * Сформировать тест для клиента. Подсказки с эталоном — временно, см. SHOW_TEST_CORRECT_ANSWERS.
+   * Плюс resolved-сайдкар `assets` (супермножество ассетов in-scope тем). Источник ассетов:
+   *   - node-bank: уже привешены на test.assets (union sourceRefs-тем);
+   *   - generate/cache: переданный subject (без лишнего запроса);
+   *   - иначе: подгружаем Subject по test.subjectId.
+   */
+  private async sanitize(test: any, subject?: unknown) {
+    const testProfile: TestGenerationProfile = test.testProfile === 'regular' ? 'regular' : 'ent';
     const showDevHints = process.env.SHOW_TEST_CORRECT_ANSWERS !== 'false';
+    const assets = Array.isArray(test.assets)
+      ? test.assets
+      : subject
+        ? collectTestAssets(subject, test)
+        : await resolveTestAssets(test);
     return {
       _id: test._id,
       subjectId: test.subjectId,
       bookId: test.bookId,
       chapterId: test.chapterId,
       testProfile,
+      assets,
       questions: test.questions.map((q: any) => {
         const base = sanitizeQuestionForClient(q as IQuestion);
         if (showDevHints) {
           return {
             ...base,
             correctAnswerHint: formatExpectedAnswer(q as IQuestion),
-            devPrefillValue: clientPrefillValueForQuestion(q as IQuestion)
+            devPrefillValue: clientPrefillValueForQuestion(q as IQuestion),
           };
         }
         return base;
       }),
-      createdAt: test.createdAt
+      createdAt: test.createdAt,
     };
   }
 
   /** Проверить ответы, вернуть userAnswers и счёт */
   private checkAnswers(test: any, answers: ISubmitTestDTO['answers']) {
     if (answers.length !== test.questions.length) {
-      throw AppError.badRequest(`Expected ${test.questions.length} answers, received ${answers.length}`);
+      throw AppError.badRequest(
+        `Expected ${test.questions.length} answers, received ${answers.length}`
+      );
     }
 
     const userAnswers: IUserAnswer[] = [];
     let correctCount = 0;
 
     for (const question of test.questions) {
-      const ua = answers.find((a) => a.questionText === question.questionText);
+      const ua = answers.find(a => a.questionText === question.questionText);
       if (!ua) throw AppError.badRequest(`Missing answer for question: "${question.questionText}"`);
 
       const isCorrect = gradeAnswer(question as IQuestion, ua.selectedOption);
       if (isCorrect) correctCount++;
-      userAnswers.push({ question: question.questionText, selectedOption: ua.selectedOption, isCorrect });
+      userAnswers.push({
+        question: question.questionText,
+        selectedOption: ua.selectedOption,
+        isCorrect,
+      });
     }
 
     const totalQuestions = test.questions.length;
     return {
       userAnswers,
-      result: { totalQuestions, correctAnswers: correctCount, scorePercent: Math.round((correctCount / totalQuestions) * 100) }
+      result: {
+        totalQuestions,
+        correctAnswers: correctCount,
+        scorePercent: Math.round((correctCount / totalQuestions) * 100),
+      },
     };
   }
 
@@ -226,12 +253,20 @@ class TestController {
     forTrial: boolean,
     test: { subjectId: unknown; bookId: unknown; questions: IQuestion[] },
     userAnswers: IUserAnswer[]
-  ): Promise<{ trialTopicMastery: Array<{ subjectId: string; nodeId: string; scorePercent: number }> } | undefined> {
+  ): Promise<
+    | { trialTopicMastery: Array<{ subjectId: string; nodeId: string; scorePercent: number }> }
+    | undefined
+  > {
     if (!forTrial) return undefined;
     const subject = await Subject.findById(String(test.subjectId)).lean();
     if (!subject) return { trialTopicMastery: [] };
     return {
-      trialTopicMastery: computeTrialTopicMasteryRows(subject, String(test.bookId), test, userAnswers)
+      trialTopicMastery: computeTrialTopicMasteryRows(
+        subject,
+        String(test.bookId),
+        test,
+        userAnswers
+      ),
     };
   }
 
@@ -241,14 +276,19 @@ class TestController {
   async generateTestGuest(req: Request, res: Response): Promise<void> {
     const dto: IGenerateTestDTO = req.body;
     const profile = this.normalizeTestProfile(dto);
-    const { contentForAI, book } = await resolveBookContentForAI(dto);
+    const { contentForAI, book, subject } = await resolveBookContentForAI(dto);
 
     // Точный кэш по контенту: тот же материал → тот же тест (без лишнего LLM-вызова).
     if (!dto.forTrial) {
       const hash = aiService.computeTestContentHash(contentForAI.text, profile, dto.questionCount);
       const cached = await this.findCachedTest(dto, profile, hash);
       if (cached) {
-        success(res, this.sanitize(cached), 'Test loaded from cache (same content)', 201);
+        success(
+          res,
+          await this.sanitize(cached, subject),
+          'Test loaded from cache (same content)',
+          201
+        );
         return;
       }
     }
@@ -260,7 +300,7 @@ class TestController {
     const generated = await aiService.generateTest(contentForAI, [], profile, genOpts);
     this.resolveTopicTitleToId(generated, book);
     const test = await this.findOrCreateTest(dto, generated, !dto.forTrial);
-    success(res, this.sanitize(test), 'Test generated successfully', 201);
+    success(res, await this.sanitize(test, subject), 'Test generated successfully', 201);
   }
 
   /**
@@ -274,7 +314,10 @@ class TestController {
     if (!test) throw AppError.notFound('Test not found');
 
     const { userAnswers, result: resultSummary } = this.checkAnswers(test, answers);
-    const { detailedAnswers, topicsToReview } = await testResultService.buildBreakdown(test, userAnswers);
+    const { detailedAnswers, topicsToReview } = await testResultService.buildBreakdown(
+      test,
+      userAnswers
+    );
     const trialExtra = await this.trialTopicMasteryPayload(Boolean(forTrial), test, userAnswers);
     success(
       res,
@@ -290,14 +333,19 @@ class TestController {
     await assertLearnerSubjectAccess(userId, dto.subjectId);
     await roadmapService.assertKnowledgeMapTestAllowed(userId, dto.subjectId, dto.roadmapNodeId);
     const profile = this.normalizeTestProfile(dto);
-    const { contentForAI, book } = await resolveBookContentForAI(dto);
+    const { contentForAI, book, subject } = await resolveBookContentForAI(dto);
 
     // Точный кэш по контенту: тот же материал → тот же тест (без лишнего LLM-вызова).
     if (!dto.forTrial) {
       const hash = aiService.computeTestContentHash(contentForAI.text, profile, dto.questionCount);
       const cached = await this.findCachedTest(dto, profile, hash);
       if (cached) {
-        success(res, this.sanitize(cached), 'Test loaded from cache (same content)', 201);
+        success(
+          res,
+          await this.sanitize(cached, subject),
+          'Test loaded from cache (same content)',
+          201
+        );
         return;
       }
     }
@@ -309,10 +357,15 @@ class TestController {
       typeof dto.questionCount === 'number' && dto.questionCount > 0
         ? { questionCount: dto.questionCount }
         : undefined;
-    const generated = await aiService.generateTest(contentForAI, previousQuestions, profile, genOpts);
+    const generated = await aiService.generateTest(
+      contentForAI,
+      previousQuestions,
+      profile,
+      genOpts
+    );
     this.resolveTopicTitleToId(generated, book);
     const test = await this.findOrCreateTest(dto, generated, !dto.forTrial);
-    success(res, this.sanitize(test), 'Test generated successfully', 201);
+    success(res, await this.sanitize(test, subject), 'Test generated successfully', 201);
   }
 
   /**
@@ -345,7 +398,7 @@ class TestController {
       console.error('[submitTest] KC mastery update failed:', err);
     }
 
-    const questionHashes = test.questions.map((q) => Buffer.from(q.questionText).toString('base64'));
+    const questionHashes = test.questions.map(q => Buffer.from(q.questionText).toString('base64'));
     const testHistory: ITestHistory = {
       testId: test._id,
       subjectId: test.subjectId,
@@ -353,7 +406,7 @@ class TestController {
       chapterId: test.chapterId,
       generatedQuestionsHash: questionHashes,
       answers: userAnswers,
-      result: resultSummary
+      result: resultSummary,
       // aiFeedback не считаем на submit — ленивая генерация в /ai-explanation
     };
 
@@ -374,7 +427,7 @@ class TestController {
           nodeId: roadmapNodeId.trim(),
           scorePercent: resultSummary.scorePercent,
           sessionId: roadmapSessionId.trim(),
-          submittedAt: new Date()
+          submittedAt: new Date(),
         });
       } catch (err) {
         console.error('[submitTest] roadmap update failed:', err);
@@ -388,7 +441,7 @@ class TestController {
         testId: test._id,
         result: resultSummary,
         ...trialExtra,
-        ...(roadmap ? { roadmap } : {})
+        ...(roadmap ? { roadmap } : {}),
       },
       'Test submitted successfully'
     );
@@ -412,9 +465,9 @@ class TestController {
     const test = await questionBankService.assembleNodeTest(subjectId, ktpTopicId, {
       userId,
       allowRefill: false,
-      ...(size != null ? { size } : {})
+      ...(size != null ? { size } : {}),
     });
-    success(res, this.sanitize(test), 'Test assembled from question bank', 201);
+    success(res, await this.sanitize(test), 'Test assembled from question bank', 201);
   }
 
   /** POST /tests/solo/start (auth) */
@@ -431,7 +484,7 @@ class TestController {
       chapterId: dto.chapterId,
       fullBook: dto.fullBook,
       testProfile: this.normalizeTestProfile(dto),
-      dateKey
+      dateKey,
     });
 
     let test = await Test.findOne({
@@ -439,12 +492,16 @@ class TestController {
       bookId: dto.bookId,
       chapterId: dto.chapterId || { $exists: false },
       testProfile: this.normalizeTestProfile(dto),
-      sourceContentHash: dailyPackId
+      sourceContentHash: dailyPackId,
     }).sort({ createdAt: -1 });
 
     if (!test) {
       const { contentForAI, book } = await resolveBookContentForAI(dto);
-      const generated = await aiService.generateTest(contentForAI, [], this.normalizeTestProfile(dto));
+      const generated = await aiService.generateTest(
+        contentForAI,
+        [],
+        this.normalizeTestProfile(dto)
+      );
       this.resolveTopicTitleToId(generated, book);
       test = await Test.create({
         subjectId: dto.subjectId,
@@ -452,7 +509,7 @@ class TestController {
         chapterId: dto.chapterId || undefined,
         questions: generated.questions,
         sourceContentHash: dailyPackId,
-        testProfile: this.normalizeTestProfile(dto)
+        testProfile: this.normalizeTestProfile(dto),
       });
     }
 
@@ -460,7 +517,7 @@ class TestController {
     const rankedDailyUsedToday = await SoloAttempt.exists({
       userId,
       attemptType: 'ranked',
-      createdAt: { $gte: this.startOfToday() }
+      createdAt: { $gte: this.startOfToday() },
     });
 
     if (mode === 'daily_pack' && rankedDailyUsedToday) {
@@ -480,13 +537,14 @@ class TestController {
       currentQuestionIndex: 0,
       questionStartedAt: new Date(),
       answers: [],
-      isFinished: false
+      isFinished: false,
     });
 
+    const sanitized = await this.sanitize(test);
     success(
       res,
       {
-        ...this.sanitize(test),
+        ...sanitized,
         mode,
         dailyPackId,
         attemptType,
@@ -494,7 +552,7 @@ class TestController {
         soloCurrentQuestionIndex: 0,
         soloQuestionStartedAt: session.questionStartedAt,
         rankedUsedToday: Boolean(rankedDailyUsedToday),
-        questionTimeLimitSec: TestController.SOLO_QUESTION_TIME_LIMIT_SEC
+        questionTimeLimitSec: TestController.SOLO_QUESTION_TIME_LIMIT_SEC,
       },
       'Solo test started',
       201
@@ -504,7 +562,11 @@ class TestController {
   /** POST /tests/solo/answer (auth) */
   async submitSoloAnswer(req: Request, res: Response): Promise<void> {
     const userId = (req as any).user?.userId;
-    const { soloSessionId, questionIndex, selectedOption }: {
+    const {
+      soloSessionId,
+      questionIndex,
+      selectedOption,
+    }: {
       soloSessionId: string;
       questionIndex: number;
       selectedOption: string;
@@ -537,23 +599,27 @@ class TestController {
       selectedOption: selectedOption || '',
       isCorrect,
       responseTimeMs: cappedMs,
-      questionScore
+      questionScore,
     });
     session.currentQuestionIndex = nextIndex;
     session.questionStartedAt = new Date();
     if (isLastQuestion) session.isFinished = true;
     await session.save();
 
-    success(res, {
-      accepted: true,
-      questionIndex,
-      isCorrect,
-      questionScore,
-      responseTimeMs: cappedMs,
-      finished: isLastQuestion,
-      nextQuestionIndex: isLastQuestion ? null : nextIndex,
-      questionStartedAt: isLastQuestion ? null : session.questionStartedAt
-    }, 'Solo answer accepted');
+    success(
+      res,
+      {
+        accepted: true,
+        questionIndex,
+        isCorrect,
+        questionScore,
+        responseTimeMs: cappedMs,
+        finished: isLastQuestion,
+        nextQuestionIndex: isLastQuestion ? null : nextIndex,
+        questionStartedAt: isLastQuestion ? null : session.questionStartedAt,
+      },
+      'Solo answer accepted'
+    );
   }
 
   /** POST /tests/solo/finish (auth) */
@@ -572,7 +638,7 @@ class TestController {
     }
 
     const finalScore = session.answers.reduce((sum, item) => sum + item.questionScore, 0);
-    const correctCount = session.answers.filter((item) => item.isCorrect).length;
+    const correctCount = session.answers.filter(item => item.isCorrect).length;
 
     const createdAttempt = await SoloAttempt.create({
       userId,
@@ -584,7 +650,7 @@ class TestController {
       finalScore,
       correctCount,
       answeredCount: session.answers.length,
-      totalQuestions: test.questions.length
+      totalQuestions: test.questions.length,
     });
 
     const betterCount = await SoloAttempt.countDocuments({
@@ -592,25 +658,29 @@ class TestController {
       attemptType: 'ranked',
       $or: [
         { finalScore: { $gt: finalScore } },
-        { finalScore, createdAt: { $lt: createdAttempt.createdAt } }
-      ]
+        { finalScore, createdAt: { $lt: createdAttempt.createdAt } },
+      ],
     });
 
-    success(res, {
-      result: {
-        totalQuestions: test.questions.length,
-        correctAnswers: correctCount,
-        scorePercent: Math.round((correctCount / test.questions.length) * 100)
+    success(
+      res,
+      {
+        result: {
+          totalQuestions: test.questions.length,
+          correctAnswers: correctCount,
+          scorePercent: Math.round((correctCount / test.questions.length) * 100),
+        },
+        solo: {
+          dailyPackId: session.dailyPackId,
+          mode: session.mode,
+          attemptType: session.attemptType,
+          finalScore,
+          questionTimeLimitSec: session.questionTimeLimitSec,
+          rank: session.attemptType === 'ranked' ? betterCount + 1 : null,
+        },
       },
-      solo: {
-        dailyPackId: session.dailyPackId,
-        mode: session.mode,
-        attemptType: session.attemptType,
-        finalScore,
-        questionTimeLimitSec: session.questionTimeLimitSec,
-        rank: session.attemptType === 'ranked' ? betterCount + 1 : null
-      }
-    }, 'Solo test finished successfully');
+      'Solo test finished successfully'
+    );
   }
 
   /** GET /tests/solo/leaderboard (auth) */
@@ -628,7 +698,7 @@ class TestController {
     const topRows = await SoloAttempt.find({
       dailyPackId,
       attemptType: 'ranked',
-      createdAt: createdAtFilter
+      createdAt: createdAtFilter,
     })
       .sort({ finalScore: -1, createdAt: 1 })
       .limit(10)
@@ -638,7 +708,7 @@ class TestController {
       dailyPackId,
       attemptType: 'ranked',
       userId,
-      createdAt: createdAtFilter
+      createdAt: createdAtFilter,
     }).sort({ finalScore: -1, createdAt: 1 });
 
     let myRank: number | null = null;
@@ -649,8 +719,8 @@ class TestController {
         createdAt: createdAtFilter,
         $or: [
           { finalScore: { $gt: meRow.finalScore } },
-          { finalScore: meRow.finalScore, createdAt: { $lt: meRow.createdAt } }
-        ]
+          { finalScore: meRow.finalScore, createdAt: { $lt: meRow.createdAt } },
+        ],
       });
       myRank = betterCount + 1;
     }
@@ -663,14 +733,14 @@ class TestController {
         userId: row.userId?._id || row.userId,
         fullName: row.userId?.fullName || row.userId?.userName || 'User',
         avatarUrl: row.userId?.avatarUrl || null,
-        score: row.finalScore
+        score: row.finalScore,
       })),
       me: meRow
         ? {
             rank: myRank,
-            score: meRow.finalScore
+            score: meRow.finalScore,
           }
-        : null
+        : null,
     });
   }
 
@@ -686,7 +756,9 @@ class TestController {
     if (!user) throw AppError.notFound('User not found');
 
     const alreadyClaimed = user.testHistory.some(
-      (h) => h.generatedQuestionsHash?.join(',') === test.questions.map((q) => Buffer.from(q.questionText).toString('base64')).join(',')
+      h =>
+        h.generatedQuestionsHash?.join(',') ===
+        test.questions.map(q => Buffer.from(q.questionText).toString('base64')).join(',')
     );
     if (alreadyClaimed) {
       success(res, { alreadyClaimed: true }, 'Test already in history');
@@ -694,7 +766,10 @@ class TestController {
     }
 
     const { userAnswers, result: resultSummary } = this.checkAnswers(test, answers);
-    const { detailedAnswers, topicsToReview } = await testResultService.buildBreakdown(test, userAnswers);
+    const { detailedAnswers, topicsToReview } = await testResultService.buildBreakdown(
+      test,
+      userAnswers
+    );
     const trialExtra = await this.trialTopicMasteryPayload(Boolean(forTrial), test, userAnswers);
 
     try {
@@ -708,7 +783,7 @@ class TestController {
       console.error('[claimGuestTest] KC mastery update failed:', err);
     }
 
-    const questionHashes = test.questions.map((q) => Buffer.from(q.questionText).toString('base64'));
+    const questionHashes = test.questions.map(q => Buffer.from(q.questionText).toString('base64'));
     const testHistory: ITestHistory = {
       testId: test._id,
       subjectId: test.subjectId,
@@ -716,7 +791,7 @@ class TestController {
       chapterId: test.chapterId,
       generatedQuestionsHash: questionHashes,
       answers: userAnswers,
-      result: resultSummary
+      result: resultSummary,
       // aiFeedback — лениво через /users/me/tests/:id/ai-explanation
     };
 
@@ -730,7 +805,14 @@ class TestController {
 
     success(
       res,
-      { testHistoryId, testId: test._id, result: resultSummary, detailedAnswers, topicsToReview, ...trialExtra },
+      {
+        testHistoryId,
+        testId: test._id,
+        result: resultSummary,
+        detailedAnswers,
+        topicsToReview,
+        ...trialExtra,
+      },
       'Guest test claimed successfully'
     );
   }
@@ -739,7 +821,7 @@ class TestController {
   async getTestById(req: Request, res: Response): Promise<void> {
     const test = await Test.findById(req.params.id);
     if (!test) throw AppError.notFound('Test not found');
-    success(res, this.sanitize(test));
+    success(res, await this.sanitize(test));
   }
 }
 
