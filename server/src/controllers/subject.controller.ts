@@ -22,9 +22,28 @@ import {
   IAddParagraphDTO,
   IContentAsset,
 } from '../types';
+import fs from 'fs/promises';
 import { success, AppError } from '../utils';
 import { API_BASE_PATH } from '../config/constants';
 import { enrichImageAssetInBackground } from '../services/asset.ai.service';
+import { assetSubjectDir, localDiskPathFromUrl } from '../middlewares/assetUpload.middleware';
+
+/** Серверные поля ассета (не принимаем от клиента; переносим только при неизменном изображении). */
+const SERVER_DERIVED_ASSET_FIELDS = [
+  'enrichment',
+  'embedding',
+  'llmDescription',
+  'ocrText',
+  'webpUrl',
+  'width',
+  'height',
+] as const;
+
+/** Best-effort удаление локального файла ассета по URL (внешние URL игнорируются). */
+async function unlinkAssetFileByUrl(url: string | undefined): Promise<void> {
+  const diskPath = url ? localDiskPathFromUrl(url) : null;
+  if (diskPath) await fs.unlink(diskPath).catch(() => undefined);
+}
 
 /**
  * Проверяет, что posted — перестановка existing (тот же набор id, без пропусков/дублей/чужих).
@@ -362,6 +381,7 @@ class SubjectController {
     );
 
     await Subject.deleteOne({ _id: oid });
+    await fs.rm(assetSubjectDir(id), { recursive: true, force: true }).catch(() => undefined);
     success(res, { deleted: true }, 'Subject deleted');
   }
 
@@ -624,17 +644,23 @@ class SubjectController {
     if (replacement.kind !== undefined && replacement.kind !== existing.kind) {
       throw AppError.badRequest('Asset kind cannot be changed');
     }
-    // Replace-семантика: тело целиком заменяет ассет; сохраняем только _id и kind, серверные поля не трогаем.
-    delete replacement.enrichment;
-    delete replacement.embedding;
+    // Replace-семантика: тело заменяет ассет; _id/kind и серверные поля клиент не задаёт.
+    for (const f of SERVER_DERIVED_ASSET_FIELDS) delete replacement[f];
     replacement._id = existing._id;
     replacement.kind = existing.kind;
-    // Enrichment переносим только если картинка не менялась; при смене url — сбрасываем (перезапустим enrich).
+    // Серверные поля (llmDescription/enrichment/embedding/webpUrl/width/height) переносим целиком,
+    // если изображение не менялось; при смене url — оставляем сброшенными (enrich перезапустится).
     const urlChanged =
       existing.kind === 'image' && String(existing.url ?? '') !== String(replacement.url ?? '');
-    if (existing.enrichment && !urlChanged) replacement.enrichment = existing.enrichment;
+    if (!urlChanged) {
+      for (const f of SERVER_DERIVED_ASSET_FIELDS) {
+        if (existing[f] !== undefined) replacement[f] = existing[f];
+      }
+    }
     topic.assets.splice(idx, 1, replacement);
     await subject.save();
+
+    if (urlChanged) await unlinkAssetFileByUrl(existing.url);
 
     if (replacement.kind === 'image' && replacement.url && !replacement.enrichment) {
       enrichImageAssetInBackground({
@@ -659,8 +685,10 @@ class SubjectController {
     if (!topic) throw AppError.notFound('Topic not found');
     const idx = topic.assets?.findIndex(a => a._id?.toString() === req.params.assetId) ?? -1;
     if (idx === -1 || !topic.assets) throw AppError.notFound('Asset not found');
+    const removed = topic.assets[idx];
     topic.assets.splice(idx, 1);
     await subject.save();
+    await unlinkAssetFileByUrl(removed.url);
     success(res, subject, 'Asset deleted');
   }
 
