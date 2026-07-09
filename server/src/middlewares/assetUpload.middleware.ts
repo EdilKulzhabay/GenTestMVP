@@ -8,6 +8,21 @@ export const ASSET_UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
 
 export const ASSET_UPLOAD_ROOT = path.join(process.cwd(), 'uploads', 'subject-assets');
 
+/** Директория загрузок предмета (для очистки при удалении предмета). */
+export function assetSubjectDir(subjectId: string): string {
+  return path.join(ASSET_UPLOAD_ROOT, subjectId);
+}
+
+/** Диск-путь локального аплоада из URL ассета; null для внешних/некорректных URL. */
+export function localDiskPathFromUrl(url: string): string | null {
+  const marker = '/uploads/subject-assets/';
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  const rel = url.slice(idx + marker.length);
+  if (!rel || rel.includes('..') || rel.includes('\0')) return null;
+  return path.join(ASSET_UPLOAD_ROOT, rel);
+}
+
 /** Пре-минтит ObjectId для имени файла (стабильное имя, не зависит от originalname). */
 export function assignAssetFileId(req: Request, _res: unknown, next: NextFunction): void {
   (req as unknown as { assetFileId?: mongoose.Types.ObjectId }).assetFileId =

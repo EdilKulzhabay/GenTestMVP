@@ -1,7 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
+import mongoose from 'mongoose';
 import { Subject } from '../models';
-import { ASSET_UPLOAD_ROOT } from '../middlewares/assetUpload.middleware';
+import { localDiskPathFromUrl } from '../middlewares/assetUpload.middleware';
 import { AppError } from '../utils';
 
 const ENRICH_VERSION = 1;
@@ -94,16 +95,6 @@ function mimeFromExt(ext: string): string {
   }
 }
 
-/** Диск-путь локального аплоада из URL ассета (только загруженные файлы). */
-function localDiskPathFromUrl(url: string): string | null {
-  const marker = '/uploads/subject-assets/';
-  const idx = url.indexOf(marker);
-  if (idx === -1) return null;
-  const rel = url.slice(idx + marker.length);
-  if (!rel || rel.includes('..') || rel.includes('\0')) return null;
-  return path.join(ASSET_UPLOAD_ROOT, rel);
-}
-
 type EnrichParams = {
   subjectId: string;
   bookId: string;
@@ -112,10 +103,22 @@ type EnrichParams = {
   assetId: string;
 };
 
+/** Фильтры arrayFilters, адресующие ассет по _id на всех уровнях (устойчиво к reorder/delete). */
+function assetArrayFilters(params: EnrichParams): Record<string, unknown>[] {
+  return [
+    { 'b._id': new mongoose.Types.ObjectId(params.bookId) },
+    { 'c._id': new mongoose.Types.ObjectId(params.chapterId) },
+    { 't._id': new mongoose.Types.ObjectId(params.topicId) },
+    { 'a._id': new mongoose.Types.ObjectId(params.assetId) },
+  ];
+}
+
+const ASSET_ENRICH_PATH = 'books.$[b].chapters.$[c].topics.$[t].assets.$[a]';
+
 async function enrichImageAsset(params: EnrichParams): Promise<void> {
   if (!process.env.OPENAI_API_KEY) return;
 
-  const subject = await Subject.findById(params.subjectId);
+  const subject = await Subject.findById(params.subjectId).lean();
   if (!subject) return;
 
   const book = subject.books.find(b => b._id?.toString() === params.bookId);
@@ -137,22 +140,51 @@ async function enrichImageAsset(params: EnrichParams): Promise<void> {
     return;
   }
 
-  const description = await describeImageAsset({
-    mimeType,
-    base64: buf.toString('base64'),
-    caption: asset.caption,
-    alt: asset.alt,
-  });
+  let description: string;
+  try {
+    description = await describeImageAsset({
+      mimeType,
+      base64: buf.toString('base64'),
+      caption: asset.caption,
+      alt: asset.alt,
+    });
+  } catch (err) {
+    // Genuine vision failure — записываем status:'failed', чтобы UI отличал «упало» от «в процессе».
+    await Subject.updateOne(
+      { _id: params.subjectId },
+      {
+        $set: {
+          [`${ASSET_ENRICH_PATH}.enrichment`]: {
+            version: ENRICH_VERSION,
+            model: ENRICH_MODEL,
+            generatedAt: new Date(),
+            status: 'failed',
+          },
+        },
+      },
+      { arrayFilters: assetArrayFilters(params) }
+    ).catch(() => undefined);
+    throw err;
+  }
   if (!description) return;
 
-  asset.llmDescription = description;
-  asset.enrichment = {
-    version: ENRICH_VERSION,
-    model: ENRICH_MODEL,
-    generatedAt: new Date(),
-    status: 'done',
-  };
-  await subject.save();
+  // Адресуем ассет по _id (arrayFilters), а не позиционно: устойчиво к reorder/delete темы
+  // во время долгого vision-запроса; при удалении ассета — безопасный no-op (matchedCount 0).
+  await Subject.updateOne(
+    { _id: params.subjectId },
+    {
+      $set: {
+        [`${ASSET_ENRICH_PATH}.llmDescription`]: description,
+        [`${ASSET_ENRICH_PATH}.enrichment`]: {
+          version: ENRICH_VERSION,
+          model: ENRICH_MODEL,
+          generatedAt: new Date(),
+          status: 'ready',
+        },
+      },
+    },
+    { arrayFilters: assetArrayFilters(params) }
+  );
 }
 
 /**
