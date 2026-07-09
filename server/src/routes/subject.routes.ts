@@ -217,6 +217,22 @@ router.post(
 );
 
 /**
+ * @route   GET /subjects/:subjectId/assets
+ * @desc    Плоский список ассетов предмета (breadcrumbs + placed); ?kind=table|image|formula|problem
+ * @access  Teacher/Admin
+ */
+router.get(
+  '/:subjectId/assets',
+  isTeacherOrAdmin,
+  [
+    param('subjectId').isMongoId().withMessage('Invalid subject ID'),
+    query('kind').optional().isIn(['table', 'image', 'formula', 'problem']),
+  ],
+  validate,
+  asyncHandler(subjectController.listSubjectAssets.bind(subjectController))
+);
+
+/**
  * @route   POST /subjects/topics/:topicId/assets
  * @desc    Добавить ассет темы (таблица/изображение/формула/задача)
  * @access  Teacher/Admin

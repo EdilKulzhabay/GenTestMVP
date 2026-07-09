@@ -27,6 +27,7 @@ import { success, AppError } from '../utils';
 import { API_BASE_PATH } from '../config/constants';
 import { enrichImageAssetInBackground } from '../services/asset.ai.service';
 import { assetSubjectDir, localDiskPathFromUrl } from '../middlewares/assetUpload.middleware';
+import { collectPlacedAssetIds } from '../utils/assetToken.util';
 
 /** Серверные поля ассета (не принимаем от клиента; переносим только при неизменном изображении). */
 const SERVER_DERIVED_ASSET_FIELDS = [
@@ -209,6 +210,67 @@ class SubjectController {
   async getSubjectById(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.id);
     success(res, subject);
+  }
+
+  /**
+   * GET /subjects/:subjectId/assets — плоский список ассетов предмета с хлебными крошками
+   * (book/chapter/topic) и флагом placed (есть ли placement-токен в прозе). Для admin-библиотеки.
+   * Опционально ?kind=table|image|formula|problem.
+   */
+  async listSubjectAssets(req: Request, res: Response): Promise<void> {
+    const id = String(req.params.subjectId);
+    if (!mongoose.isValidObjectId(id)) throw AppError.badRequest('Invalid subject id');
+    const kindFilter = typeof req.query.kind === 'string' ? req.query.kind : undefined;
+
+    const subject = await Subject.findById(id, {
+      title: 1,
+      'books._id': 1,
+      'books.title': 1,
+      'books.chapters._id': 1,
+      'books.chapters.title': 1,
+      'books.chapters.topics._id': 1,
+      'books.chapters.topics.title': 1,
+      'books.chapters.topics.assets': 1,
+      'books.chapters.topics.paragraphs.content.text': 1,
+    }).lean();
+    if (!subject) throw AppError.notFound('Subject not found');
+
+    const items: Record<string, unknown>[] = [];
+    const byKind: Record<string, number> = {};
+    for (const book of subject.books ?? []) {
+      for (const chapter of book.chapters ?? []) {
+        for (const topic of chapter.topics ?? []) {
+          const placed = new Set<string>();
+          for (const paragraph of topic.paragraphs ?? []) {
+            for (const pid of collectPlacedAssetIds(paragraph.content?.text ?? '')) placed.add(pid);
+          }
+          for (const asset of topic.assets ?? []) {
+            if (kindFilter && asset.kind !== kindFilter) continue;
+            byKind[asset.kind] = (byKind[asset.kind] ?? 0) + 1;
+            items.push({
+              ...asset,
+              placed: asset._id ? placed.has(String(asset._id)) : false,
+              breadcrumb: {
+                bookId: String(book._id),
+                bookTitle: book.title,
+                chapterId: String(chapter._id),
+                chapterTitle: chapter.title,
+                topicId: String(topic._id),
+                topicTitle: topic.title,
+              },
+            });
+          }
+        }
+      }
+    }
+
+    success(res, {
+      subjectId: id,
+      title: subject.title,
+      total: items.length,
+      byKind,
+      assets: items,
+    });
   }
 
   /** POST /subjects/:id/books */
