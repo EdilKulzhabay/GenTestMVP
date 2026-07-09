@@ -302,8 +302,8 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
           await session.save();
 
           const nextQuestion = isLastQuestion ? null : test.questions[nextIndex];
-          const assets = await resolveTestAssets(test);
 
+          // assets неизменны на сессию и уже отданы в solo:join — не резолвим/не шлём повторно.
           ack?.({
             success: true,
             accepted: true,
@@ -314,7 +314,6 @@ export const initSocketServer = (httpServer: HttpServer): Server => {
             finished: isLastQuestion,
             nextQuestionIndex: isLastQuestion ? null : nextIndex,
             questionStartedAt: isLastQuestion ? null : session.questionStartedAt,
-            assets,
             nextQuestion: nextQuestion
               ? sanitizeQuestionForKahoot(nextQuestion as IQuestion)
               : null,

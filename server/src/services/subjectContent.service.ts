@@ -91,7 +91,13 @@ export async function resolveTestAssets(test: {
   chapterId?: unknown;
   questions?: Array<{ relatedContent?: { assetIds?: unknown } }>;
 }): Promise<IContentAsset[]> {
-  const subject = await Subject.findById(String(test.subjectId)).lean();
+  // Проекция: тянем только то, что читает collectTestAssets (book/chapter _id + topics.assets),
+  // без объёмного текста параграфов. Пути-сиблинги, чистое включение — без коллизий/микса.
+  const subject = await Subject.findById(String(test.subjectId), {
+    'books._id': 1,
+    'books.chapters._id': 1,
+    'books.chapters.topics.assets': 1,
+  }).lean();
   if (!subject) return [];
   return collectTestAssets(subject, test);
 }
