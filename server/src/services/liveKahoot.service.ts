@@ -136,10 +136,19 @@ function clearHostGraceTimer(room: LiveRoomState): void {
   }
 }
 
-/** Есть ли у пользователя живой сокет (личный канал user:${userId} непустой). */
-function hasLiveSocket(userId: string): boolean {
-  const sockets = ioRef?.sockets.adapter.rooms.get(`user:${userId}`);
-  return !!sockets && sockets.size > 0;
+/**
+ * Есть ли у пользователя живой сокет, подключённый к каналу ИМЕННО этой комнаты.
+ * Личный канал user:${userId} не годится: туда входит любой сокет приложения
+ * (дашборд, соло-игра), а присутствие в комнате доказывает только live:${roomId}.
+ */
+function hasSocketInRoomChannel(userId: string, roomId: string): boolean {
+  const socketIds = ioRef?.sockets.adapter.rooms.get(roomChannel(roomId));
+  if (!socketIds) return false;
+  for (const sid of socketIds) {
+    const s = ioRef?.sockets.sockets.get(sid) as { userId?: string } | undefined;
+    if (s?.userId === userId) return true;
+  }
+  return false;
 }
 
 /**
@@ -155,7 +164,7 @@ function scheduleHostGraceClose(room: LiveRoomState): void {
     const cur = rooms.get(room.id);
     if (!cur || cur.phase !== 'lobby') return;
     cur.hostGraceTimer = null;
-    if (hasLiveSocket(cur.hostId)) return;
+    if (hasSocketInRoomChannel(cur.hostId, cur.id)) return;
     doLeaveLobby(cur.hostId, cur.id);
   }, HOST_DISCONNECT_GRACE_MS);
 }
@@ -597,14 +606,22 @@ export function rejoinLiveRoom(
 }
 
 export function onLiveUserDisconnect(userId: string, roomId?: string): void {
-  const rid = roomId ?? userRoom.get(userId);
-  if (!rid) return;
-  const room = rooms.get(rid);
-  if (!room) return;
+  if (!userId) return;
+  let rid = roomId;
+  let room = rid ? rooms.get(rid) : undefined;
+  // liveRoomId сокета может быть протухшим (та комната уже умерла) — тогда
+  // ищем актуальную комнату пользователя по карте userRoom, иначе disconnect
+  // последнего сокета не закроет живую комнату (утечка «зомби-лобби»).
+  if (!room || (room.hostId !== userId && !room.participants.has(userId))) {
+    rid = userRoom.get(userId);
+    room = rid ? rooms.get(rid) : undefined;
+  }
+  if (!room || !rid) return;
   if (room.phase !== 'lobby') return;
   if (room.hostId === userId) {
-    // Хост уже онлайн другим сокетом (поздний disconnect старого) — игнорируем
-    if (hasLiveSocket(userId)) return;
+    // У хоста есть другой сокет в канале этой комнаты (второй таб, поздний
+    // disconnect старого сокета после rejoin нового) — комната не осиротела.
+    if (hasSocketInRoomChannel(userId, rid)) return;
     scheduleHostGraceClose(room);
     return;
   }
