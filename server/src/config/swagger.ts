@@ -885,6 +885,55 @@ REST-эндпоинты \`/tests/solo/*\` плюс события \`solo:*\` н�
           }
         }
       },
+      Achievements: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          data: {
+            type: 'object',
+            properties: {
+              achievements: {
+                type: 'array',
+                description:
+                  'Статусы по id из статичного каталога клиента. Достижения без серверных событий (bookworm, fast, rising) не включаются.',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string', example: 'ach-kahoot-win' },
+                    status: { type: 'string', enum: ['locked', 'in_progress', 'unlocked'] },
+                    ratio: { type: 'number', description: '0–1, присутствует при in_progress' },
+                    unlockedAt: { type: 'string', format: 'date-time', description: 'Дата события разблокировки (где известна)' },
+                    current: { type: 'number' },
+                    target: { type: 'number' }
+                  }
+                }
+              },
+              updatedAt: { type: 'string', format: 'date-time' }
+            }
+          }
+        }
+      },
+      MyScore: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          data: {
+            type: 'object',
+            properties: {
+              total: { type: 'number', example: 12450 },
+              breakdown: {
+                type: 'object',
+                properties: {
+                  tests: { type: 'number', description: 'Правильные ответы в тестах × 10' },
+                  solo: { type: 'number', description: 'Speed-очки solo-кахутов ÷ 10' },
+                  live: { type: 'number', description: 'Speed-очки live-матчей ÷ 10' }
+                }
+              },
+              updatedAt: { type: 'string', format: 'date-time' }
+            }
+          }
+        }
+      },
       PaginationQuery: {
         type: 'object',
         properties: {
@@ -2309,6 +2358,26 @@ REST-эндпоинты \`/tests/solo/*\` плюс события \`solo:*\` н�
         security: [{ cookieAuth: [] }, { bearerAuth: [] }],
         responses: {
           200: { description: 'Прогноз и разбивка по блокам ЕНТ', content: { 'application/json': { schema: { $ref: '#/components/schemas/EntProgress' } } } }
+        }
+      }
+    },
+    '/users/me/achievements': {
+      get: {
+        tags: ['Users'],
+        summary: 'Статусы достижений (id соответствуют каталогу клиента)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        responses: {
+          200: { description: 'Статусы достижений', content: { 'application/json': { schema: { $ref: '#/components/schemas/Achievements' } } } }
+        }
+      }
+    },
+    '/users/me/score': {
+      get: {
+        tags: ['Users'],
+        summary: 'Серверный счёт баллов (тесты + solo + live)',
+        security: [{ cookieAuth: [] }, { bearerAuth: [] }],
+        responses: {
+          200: { description: 'Счёт и разбивка по источникам', content: { 'application/json': { schema: { $ref: '#/components/schemas/MyScore' } } } }
         }
       }
     },

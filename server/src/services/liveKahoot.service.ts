@@ -1,6 +1,6 @@
 import { randomBytes, randomInt } from 'crypto';
 import type { Server } from 'socket.io';
-import { Test, User } from '../models';
+import { LiveMatchResult, Test, User } from '../models';
 import { IContentAsset, IQuestion, ITest } from '../types';
 import { assertLearnerSubjectAccess } from '../utils/learnerSubjectAccess.util';
 import { gradeAnswer, sanitizeQuestionForKahoot } from '../utils/entQuestion.util';
@@ -284,7 +284,29 @@ async function finishGame(room: LiveRoomState): Promise<void> {
   for (const uid of room.participants.keys()) {
     emitRoomStateToUser(uid, room);
   }
+  persistLiveMatchResults(room).catch(err =>
+    console.error('[liveKahoot] не удалось сохранить результаты матча', err)
+  );
   scheduleRoomCleanup(room.id, 60 * 60 * 1000);
+}
+
+/** Персист финального лидерборда (по строке на участника). Ошибка записи не влияет на игру. */
+async function persistLiveMatchResults(room: LiveRoomState): Promise<void> {
+  const leaderboard = room.finalLeaderboard;
+  if (!leaderboard || leaderboard.length === 0) return;
+  const finishedAt = new Date();
+  await LiveMatchResult.insertMany(
+    leaderboard.map(row => ({
+      userId: row.userId,
+      roomId: room.id,
+      testId: room.testId,
+      rank: row.rank,
+      totalScore: row.totalScore,
+      participantsCount: leaderboard.length,
+      finishedAt
+    })),
+    { ordered: false }
+  );
 }
 
 function maybeEarlyResolve(room: LiveRoomState): void {

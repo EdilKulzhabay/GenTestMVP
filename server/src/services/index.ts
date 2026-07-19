@@ -7,6 +7,8 @@ export { aiService } from './ai.service';
 export { testResultService } from './testResult.service';
 export { profileStatsService } from './profileStats.service';
 export { entProgressService } from './entProgress.service';
+export { scoreService } from './score.service';
+export { achievementsService } from './achievements.service';
 export { roadmapService } from './roadmap.service';
 export { trialService } from './trial.service';
 export { roadmapAIService } from './roadmap.ai.service';
