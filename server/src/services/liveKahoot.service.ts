@@ -8,6 +8,8 @@ import { resolveTestAssets } from './subjectContent.service';
 
 const QUESTION_TIME_LIMIT_SEC = 15;
 const BETWEEN_ROUNDS_MS = 1500;
+/** Grace-окно на реконнект хоста после обрыва связи в лобби (LIVE_HOST_GRACE_MS для тестов/стейджинга). */
+const HOST_DISCONNECT_GRACE_MS = Number(process.env.LIVE_HOST_GRACE_MS || '') || 45_000;
 
 const pinToRoomId = new Map<string, string>();
 const rooms = new Map<string, LiveRoomState>();
@@ -74,6 +76,7 @@ interface LiveRoomState {
   questionTimer: ReturnType<typeof setTimeout> | null;
   betweenRoundsTimer: ReturnType<typeof setTimeout> | null;
   finishedTimer: ReturnType<typeof setTimeout> | null;
+  hostGraceTimer: ReturnType<typeof setTimeout> | null;
   finalLeaderboard:
     | {
         rank: number;
@@ -123,6 +126,38 @@ function clearRoomTimers(room: LiveRoomState): void {
     clearTimeout(room.finishedTimer);
     room.finishedTimer = null;
   }
+  clearHostGraceTimer(room);
+}
+
+function clearHostGraceTimer(room: LiveRoomState): void {
+  if (room.hostGraceTimer) {
+    clearTimeout(room.hostGraceTimer);
+    room.hostGraceTimer = null;
+  }
+}
+
+/** Есть ли у пользователя живой сокет (личный канал user:${userId} непустой). */
+function hasLiveSocket(userId: string): boolean {
+  const sockets = ioRef?.sockets.adapter.rooms.get(`user:${userId}`);
+  return !!sockets && sockets.size > 0;
+}
+
+/**
+ * Обрыв связи у хоста в лобби: комнату не убиваем сразу, а держим grace-окно —
+ * live:rejoin хоста (по userId) снимает таймер. По истечении окна закрываем как
+ * раньше: live:room_closed + deleteRoom. При long-polling disconnect старого
+ * сокета может прийти после реконнекта нового, поэтому колбэк перепроверяет,
+ * не появился ли у хоста живой сокет.
+ */
+function scheduleHostGraceClose(room: LiveRoomState): void {
+  clearHostGraceTimer(room);
+  room.hostGraceTimer = setTimeout(() => {
+    const cur = rooms.get(room.id);
+    if (!cur || cur.phase !== 'lobby') return;
+    cur.hostGraceTimer = null;
+    if (hasLiveSocket(cur.hostId)) return;
+    doLeaveLobby(cur.hostId, cur.id);
+  }, HOST_DISCONNECT_GRACE_MS);
 }
 
 function canHostStart(room: LiveRoomState): boolean {
@@ -363,6 +398,7 @@ export async function createLiveRoom(
       questionTimer: null,
       betweenRoundsTimer: null,
       finishedTimer: null,
+      hostGraceTimer: null,
       finalLeaderboard: null,
     };
     room.revision = nextRevision();
@@ -397,6 +433,7 @@ export function tryJoinByPin(
     return { ok: false, code: 'ALREADY_STARTED' };
   }
   if (room.hostId === userId) {
+    clearHostGraceTimer(room);
     userRoom.set(userId, roomId);
     return { ok: true, roomId, state: buildStatePayload(room, userId) };
   }
@@ -532,6 +569,7 @@ export function rejoinLiveRoom(
   const room = rooms.get(roomId);
   if (!room) return { ok: false, code: 'NOT_FOUND' };
   if (!room.participants.has(userId)) return { ok: false, code: 'NOT_MEMBER' };
+  if (room.hostId === userId) clearHostGraceTimer(room);
   userRoom.set(userId, roomId);
   return { ok: true, state: buildStatePayload(room, userId) };
 }
@@ -541,9 +579,14 @@ export function onLiveUserDisconnect(userId: string, roomId?: string): void {
   if (!rid) return;
   const room = rooms.get(rid);
   if (!room) return;
-  if (room.phase === 'lobby') {
-    doLeaveLobby(userId, rid);
+  if (room.phase !== 'lobby') return;
+  if (room.hostId === userId) {
+    // Хост уже онлайн другим сокетом (поздний disconnect старого) — игнорируем
+    if (hasLiveSocket(userId)) return;
+    scheduleHostGraceClose(room);
+    return;
   }
+  doLeaveLobby(userId, rid);
 }
 
 export function leaveLiveLobby(userId: string, roomId: string): boolean {

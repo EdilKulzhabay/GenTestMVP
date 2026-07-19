@@ -77,6 +77,7 @@
     
     - Во всех событиях есть **revision** (монотонно растёт), чтобы игнорировать дубли при reconnect.
     - При reconnect клиент получает ROOM_SNAPSHOT и продолжает с актуального состояния.
+    - Обрыв связи у **хоста** в лобби не убивает комнату сразу: grace-окно (по умолчанию 45 с, `LIVE_HOST_GRACE_MS`), в течение которого `live:rejoin` по userId возвращает хоста; по истечении — `live:room_closed` как раньше. Явный `live:lobby_leave` хоста закрывает комнату немедленно.
 - Данные/метрики, которые стоит сохранять (MVP)
     - Solo attempt
         - userId, dailyPackId, attemptType (ranked/practice), finalScore, correctCount (рекомендуется), answeredCount (рекомендуется), city, createdAt
