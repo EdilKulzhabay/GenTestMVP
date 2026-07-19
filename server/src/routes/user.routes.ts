@@ -100,6 +100,36 @@ router.get(
   asyncHandler(userController.getProfileStats.bind(userController))
 );
 
+/**
+ * @route   GET /users/me/ent-progress
+ * @desc    Прогноз балла ЕНТ (шкала 140) по накопленным результатам
+ * @access  Private
+ */
+router.get(
+  '/me/ent-progress',
+  asyncHandler(userController.getEntProgress.bind(userController))
+);
+
+/**
+ * @route   GET /users/me/achievements
+ * @desc    Статусы достижений (id соответствуют каталогу клиента)
+ * @access  Private
+ */
+router.get(
+  '/me/achievements',
+  asyncHandler(userController.getAchievements.bind(userController))
+);
+
+/**
+ * @route   GET /users/me/score
+ * @desc    Серверный счёт баллов (тесты + solo + live)
+ * @access  Private
+ */
+router.get(
+  '/me/score',
+  asyncHandler(userController.getMyScore.bind(userController))
+);
+
 // Валидатор id записи истории — общий для всех под-роутов
 const testHistoryIdValidator = [
   param('testHistoryId').isMongoId().withMessage('Invalid test history ID')

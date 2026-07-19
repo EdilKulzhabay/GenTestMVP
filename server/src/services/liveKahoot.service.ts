@@ -1,17 +1,23 @@
 import { randomBytes, randomInt } from 'crypto';
 import type { Server } from 'socket.io';
-import { Test, User } from '../models';
-import { IQuestion, ITest } from '../types';
+import { LiveMatchResult, Test, User } from '../models';
+import { IContentAsset, IQuestion, ITest } from '../types';
 import { assertLearnerSubjectAccess } from '../utils/learnerSubjectAccess.util';
-import { gradeAnswer, sanitizeQuestionForClient } from '../utils/entQuestion.util';
+import { gradeAnswer, sanitizeQuestionForKahoot } from '../utils/entQuestion.util';
+import { resolveTestAssets } from './subjectContent.service';
 
 const QUESTION_TIME_LIMIT_SEC = 15;
 const BETWEEN_ROUNDS_MS = 1500;
+/** Grace-окно на реконнект хоста после обрыва связи в лобби (LIVE_HOST_GRACE_MS для тестов/стейджинга). */
+const HOST_DISCONNECT_GRACE_MS = Number(process.env.LIVE_HOST_GRACE_MS || '') || 45_000;
 
 const pinToRoomId = new Map<string, string>();
 const rooms = new Map<string, LiveRoomState>();
 const userRoom = new Map<string, string>();
-const createInFlight = new Map<string, Promise<{ roomId: string; pin: string; state: Record<string, unknown> }>>();
+const createInFlight = new Map<
+  string,
+  Promise<{ roomId: string; pin: string; state: Record<string, unknown> }>
+>();
 let ioRef: Server | null = null;
 let revGlobal = 0;
 
@@ -54,9 +60,14 @@ interface LiveRoomState {
   hostId: string;
   testId: string;
   test: { questions: IQuestion[] };
+  /** Resolved-сайдкар ассетов (снапшот на момент создания комнаты). */
+  assets: IContentAsset[];
   phase: LiveRoomPhase;
   revision: number;
-  participants: Map<string, { displayName: string; avatarUrl?: string | null; ready: boolean; isHost: boolean }>;
+  participants: Map<
+    string,
+    { displayName: string; avatarUrl?: string | null; ready: boolean; isHost: boolean }
+  >;
   currentQuestionIndex: number;
   questionEndAt: number | null;
   questionStartedAt: number;
@@ -65,18 +76,27 @@ interface LiveRoomState {
   questionTimer: ReturnType<typeof setTimeout> | null;
   betweenRoundsTimer: ReturnType<typeof setTimeout> | null;
   finishedTimer: ReturnType<typeof setTimeout> | null;
+  hostGraceTimer: ReturnType<typeof setTimeout> | null;
   finalLeaderboard:
-    | { rank: number; userId: string; displayName: string; avatarUrl?: string | null; totalScore: number }[]
+    | {
+        rank: number;
+        userId: string;
+        displayName: string;
+        avatarUrl?: string | null;
+        totalScore: number;
+      }[]
     | null;
 }
 
-function getDisplayInfoForUserId(userId: string): Promise<{ displayName: string; avatarUrl: string | null }> {
+function getDisplayInfoForUserId(
+  userId: string
+): Promise<{ displayName: string; avatarUrl: string | null }> {
   return User.findById(userId)
     .select('fullName avatarUrl')
     .lean()
-    .then((u) => ({
+    .then(u => ({
       displayName: u?.fullName && String(u.fullName).trim() ? String(u.fullName) : 'Игрок',
-      avatarUrl: (u as { avatarUrl?: string })?.avatarUrl || null
+      avatarUrl: (u as { avatarUrl?: string })?.avatarUrl || null,
     }));
 }
 
@@ -106,12 +126,53 @@ function clearRoomTimers(room: LiveRoomState): void {
     clearTimeout(room.finishedTimer);
     room.finishedTimer = null;
   }
+  clearHostGraceTimer(room);
+}
+
+function clearHostGraceTimer(room: LiveRoomState): void {
+  if (room.hostGraceTimer) {
+    clearTimeout(room.hostGraceTimer);
+    room.hostGraceTimer = null;
+  }
+}
+
+/**
+ * Есть ли у пользователя живой сокет, подключённый к каналу ИМЕННО этой комнаты.
+ * Личный канал user:${userId} не годится: туда входит любой сокет приложения
+ * (дашборд, соло-игра), а присутствие в комнате доказывает только live:${roomId}.
+ */
+function hasSocketInRoomChannel(userId: string, roomId: string): boolean {
+  const socketIds = ioRef?.sockets.adapter.rooms.get(roomChannel(roomId));
+  if (!socketIds) return false;
+  for (const sid of socketIds) {
+    const s = ioRef?.sockets.sockets.get(sid) as { userId?: string } | undefined;
+    if (s?.userId === userId) return true;
+  }
+  return false;
+}
+
+/**
+ * Обрыв связи у хоста в лобби: комнату не убиваем сразу, а держим grace-окно —
+ * live:rejoin хоста (по userId) снимает таймер. По истечении окна закрываем как
+ * раньше: live:room_closed + deleteRoom. При long-polling disconnect старого
+ * сокета может прийти после реконнекта нового, поэтому колбэк перепроверяет,
+ * не появился ли у хоста живой сокет.
+ */
+function scheduleHostGraceClose(room: LiveRoomState): void {
+  clearHostGraceTimer(room);
+  room.hostGraceTimer = setTimeout(() => {
+    const cur = rooms.get(room.id);
+    if (!cur || cur.phase !== 'lobby') return;
+    cur.hostGraceTimer = null;
+    if (hasSocketInRoomChannel(cur.hostId, cur.id)) return;
+    doLeaveLobby(cur.hostId, cur.id);
+  }, HOST_DISCONNECT_GRACE_MS);
 }
 
 function canHostStart(room: LiveRoomState): boolean {
-  const others = [...room.participants.values()].filter((p) => !p.isHost);
+  const others = [...room.participants.values()].filter(p => !p.isHost);
   if (others.length === 0) return true;
-  return others.every((p) => p.ready);
+  return others.every(p => p.ready);
 }
 
 function buildStatePayload(room: LiveRoomState, forUserId: string): Record<string, unknown> {
@@ -122,7 +183,7 @@ function buildStatePayload(room: LiveRoomState, forUserId: string): Record<strin
       avatarUrl: p.avatarUrl ?? null,
       isHost: p.isHost,
       ready: p.ready,
-      totalScore: room.totalScoreByUser.get(userId) ?? 0
+      totalScore: room.totalScoreByUser.get(userId) ?? 0,
     };
     return base;
   });
@@ -132,7 +193,7 @@ function buildStatePayload(room: LiveRoomState, forUserId: string): Record<strin
   const q = room.test.questions[room.currentQuestionIndex];
   const sanitized =
     room.phase === 'playing' && q && room.currentQuestionIndex < totalQuestions
-      ? sanitizeQuestionForClient(q as IQuestion)
+      ? sanitizeQuestionForKahoot(q as IQuestion)
       : null;
 
   return {
@@ -142,6 +203,7 @@ function buildStatePayload(room: LiveRoomState, forUserId: string): Record<strin
     pin: room.pin,
     testId: room.testId,
     hostId: room.hostId,
+    assets: room.assets ?? [],
     totalQuestions,
     me: me
       ? { userId: forUserId, isHost: me.isHost, ready: me.ready }
@@ -155,7 +217,8 @@ function buildStatePayload(room: LiveRoomState, forUserId: string): Record<strin
     questionEndAt: room.phase === 'playing' ? room.questionEndAt : null,
     currentQuestion: sanitized,
     hasSubmittedThisRound: room.currentAnswers.has(forUserId),
-    finalLeaderboard: room.phase === 'finished' && room.finalLeaderboard ? room.finalLeaderboard : null
+    finalLeaderboard:
+      room.phase === 'finished' && room.finalLeaderboard ? room.finalLeaderboard : null,
   };
 }
 
@@ -221,7 +284,7 @@ async function finishGame(room: LiveRoomState): Promise<void> {
       userId,
       displayName: p?.displayName ?? 'Игрок',
       avatarUrl: p?.avatarUrl ?? null,
-      totalScore
+      totalScore,
     };
   });
   scores.sort((a, b) => b.totalScore - a.totalScore);
@@ -230,13 +293,35 @@ async function finishGame(room: LiveRoomState): Promise<void> {
   for (const uid of room.participants.keys()) {
     emitRoomStateToUser(uid, room);
   }
+  persistLiveMatchResults(room).catch(err =>
+    console.error('[liveKahoot] не удалось сохранить результаты матча', err)
+  );
   scheduleRoomCleanup(room.id, 60 * 60 * 1000);
+}
+
+/** Персист финального лидерборда (по строке на участника). Ошибка записи не влияет на игру. */
+async function persistLiveMatchResults(room: LiveRoomState): Promise<void> {
+  const leaderboard = room.finalLeaderboard;
+  if (!leaderboard || leaderboard.length === 0) return;
+  const finishedAt = new Date();
+  await LiveMatchResult.insertMany(
+    leaderboard.map(row => ({
+      userId: row.userId,
+      roomId: room.id,
+      testId: room.testId,
+      rank: row.rank,
+      totalScore: row.totalScore,
+      participantsCount: leaderboard.length,
+      finishedAt
+    })),
+    { ordered: false }
+  );
 }
 
 function maybeEarlyResolve(room: LiveRoomState): void {
   const eligible = [...room.participants.keys()];
   if (eligible.length === 0) return;
-  const allIn = eligible.every((uid) => room.currentAnswers.has(uid));
+  const allIn = eligible.every(uid => room.currentAnswers.has(uid));
   if (allIn) {
     if (room.questionTimer) {
       clearTimeout(room.questionTimer);
@@ -302,11 +387,14 @@ export async function createLiveRoom(
     return createInFlight.get(userId)!;
   }
   const run = (async () => {
-    const testDoc = (await Test.findById(testId).lean()) as ITest & { _id: { toString: () => string } };
+    const testDoc = (await Test.findById(testId).lean()) as ITest & {
+      _id: { toString: () => string };
+    };
     if (!testDoc?.questions?.length) {
       throw new Error('Test not found');
     }
     await assertLearnerSubjectAccess(userId, testDoc.subjectId.toString());
+    const assets = await resolveTestAssets(testDoc);
     if (userRoom.has(userId)) {
       const old = userRoom.get(userId);
       if (old) {
@@ -324,10 +412,14 @@ export async function createLiveRoom(
       hostId: userId,
       testId: testDoc._id.toString(),
       test: { questions: testDoc.questions as IQuestion[] },
+      assets,
       phase: 'lobby',
       revision: 0,
       participants: new Map([
-        [userId, { displayName: info.displayName, avatarUrl: info.avatarUrl, ready: false, isHost: true }]
+        [
+          userId,
+          { displayName: info.displayName, avatarUrl: info.avatarUrl, ready: false, isHost: true },
+        ],
       ]),
       currentQuestionIndex: 0,
       questionEndAt: null,
@@ -337,7 +429,8 @@ export async function createLiveRoom(
       questionTimer: null,
       betweenRoundsTimer: null,
       finishedTimer: null,
-      finalLeaderboard: null
+      hostGraceTimer: null,
+      finalLeaderboard: null,
     };
     room.revision = nextRevision();
     rooms.set(id, room);
@@ -371,6 +464,7 @@ export function tryJoinByPin(
     return { ok: false, code: 'ALREADY_STARTED' };
   }
   if (room.hostId === userId) {
+    clearHostGraceTimer(room);
     userRoom.set(userId, roomId);
     return { ok: true, roomId, state: buildStatePayload(room, userId) };
   }
@@ -389,7 +483,7 @@ export function tryJoinByPin(
   }
   if (!room.participants.has(userId)) {
     const displayName = 'Игрок';
-    void getDisplayInfoForUserId(userId).then((info) => {
+    void getDisplayInfoForUserId(userId).then(info => {
       const r = rooms.get(roomId);
       if (!r || r.phase !== 'lobby' || !r.participants.has(userId)) return;
       const p = r.participants.get(userId);
@@ -423,7 +517,7 @@ export function setReady(
       roomIdUsed: rid,
       userId,
       roomCount: rooms.size,
-      sampleRoomIds: [...rooms.keys()].slice(0, 5)
+      sampleRoomIds: [...rooms.keys()].slice(0, 5),
     };
     console.warn('[liveKahoot:setReady]', debug);
     return { ok: false, message: 'Комната не найдена', debug };
@@ -442,7 +536,7 @@ export function setReady(
       userId,
       userRoomMap: userMappedRoom,
       participantIds: [...room.participants.keys()],
-      roomHostId: room.hostId
+      roomHostId: room.hostId,
     };
     console.warn(
       '[liveKahoot:setReady] участник не в room.participants (сокет/сессия не совпали с картой userRoom?)',
@@ -460,10 +554,7 @@ export function setReady(
   return { ok: true };
 }
 
-export function startLiveGame(
-  userId: string,
-  roomId: string
-): { ok: boolean; message?: string } {
+export function startLiveGame(userId: string, roomId: string): { ok: boolean; message?: string } {
   const room = rooms.get(roomId);
   if (!room) return { ok: false, message: 'Комната не найдена' };
   if (room.hostId !== userId) return { ok: false, message: 'Только ведущий может начать' };
@@ -486,13 +577,17 @@ export function submitLiveAnswer(
   const room = rooms.get(roomId);
   if (!room || room.phase !== 'playing') return { ok: false, message: 'Сейчас нельзя ответить' };
   if (!room.participants.has(userId)) return { ok: false, message: 'Вы не в игре' };
-  if (room.currentQuestionIndex !== questionIndex) return { ok: false, message: 'Несовпадение вопроса' };
+  if (room.currentQuestionIndex !== questionIndex)
+    return { ok: false, message: 'Несовпадение вопроса' };
   if (room.currentAnswers.has(userId)) return { ok: false, message: 'Ответ уже отправлен' };
   const end = room.questionEndAt;
   if (end != null && Date.now() > end) {
     return { ok: false, message: 'Время вышло' };
   }
-  room.currentAnswers.set(userId, { selectedOption: selectedOption || '', submittedAt: Date.now() });
+  room.currentAnswers.set(userId, {
+    selectedOption: selectedOption || '',
+    submittedAt: Date.now(),
+  });
   bumpAndEmit(room);
   maybeEarlyResolve(room);
   return { ok: true };
@@ -505,18 +600,32 @@ export function rejoinLiveRoom(
   const room = rooms.get(roomId);
   if (!room) return { ok: false, code: 'NOT_FOUND' };
   if (!room.participants.has(userId)) return { ok: false, code: 'NOT_MEMBER' };
+  if (room.hostId === userId) clearHostGraceTimer(room);
   userRoom.set(userId, roomId);
   return { ok: true, state: buildStatePayload(room, userId) };
 }
 
 export function onLiveUserDisconnect(userId: string, roomId?: string): void {
-  const rid = roomId ?? userRoom.get(userId);
-  if (!rid) return;
-  const room = rooms.get(rid);
-  if (!room) return;
-  if (room.phase === 'lobby') {
-    doLeaveLobby(userId, rid);
+  if (!userId) return;
+  let rid = roomId;
+  let room = rid ? rooms.get(rid) : undefined;
+  // liveRoomId сокета может быть протухшим (та комната уже умерла) — тогда
+  // ищем актуальную комнату пользователя по карте userRoom, иначе disconnect
+  // последнего сокета не закроет живую комнату (утечка «зомби-лобби»).
+  if (!room || (room.hostId !== userId && !room.participants.has(userId))) {
+    rid = userRoom.get(userId);
+    room = rid ? rooms.get(rid) : undefined;
   }
+  if (!room || !rid) return;
+  if (room.phase !== 'lobby') return;
+  if (room.hostId === userId) {
+    // У хоста есть другой сокет в канале этой комнаты (второй таб, поздний
+    // disconnect старого сокета после rejoin нового) — комната не осиротела.
+    if (hasSocketInRoomChannel(userId, rid)) return;
+    scheduleHostGraceClose(room);
+    return;
+  }
+  doLeaveLobby(userId, rid);
 }
 
 export function leaveLiveLobby(userId: string, roomId: string): boolean {

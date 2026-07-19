@@ -9,23 +9,23 @@ export {
   authorize,
   isAdmin,
   isTeacherOrAdmin,
-  isUser
+  isUser,
 } from './auth.middleware';
 
-export {
-  errorHandler,
-  notFound,
-  asyncHandler
-} from './errorHandler.middleware';
+export { errorHandler, notFound, asyncHandler } from './errorHandler.middleware';
 
-export {
-  validate,
-  validateRequest
-} from './validation.middleware';
+export { validate, validateRequest } from './validation.middleware';
 
 export {
   roadmapChatUpload,
   assignRoadmapAttachmentId,
   ROADMAP_CHAT_MAX_BYTES,
-  ROADMAP_CHAT_UPLOAD_ROOT
+  ROADMAP_CHAT_UPLOAD_ROOT,
 } from './roadmapChatUpload.middleware';
+
+export {
+  assetUpload,
+  assignAssetFileId,
+  ASSET_UPLOAD_MAX_BYTES,
+  ASSET_UPLOAD_ROOT,
+} from './assetUpload.middleware';

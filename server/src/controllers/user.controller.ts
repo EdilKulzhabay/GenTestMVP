@@ -1,7 +1,13 @@
 import { Request, Response } from 'express';
 import { User, ProfileSubjectPair, Test } from '../models';
 import { success, AppError } from '../utils';
-import { testResultService, profileStatsService } from '../services';
+import {
+  testResultService,
+  profileStatsService,
+  entProgressService,
+  achievementsService,
+  scoreService
+} from '../services';
 import { ITestHistory, IUserAnswer } from '../types';
 
 class UserController {
@@ -149,6 +155,21 @@ class UserController {
   async getProfileStats(req: Request, res: Response): Promise<void> {
     const stats = await profileStatsService.getProfileStats(this.userId(req));
     success(res, stats);
+  }
+
+  /** GET /users/me/ent-progress — прогноз балла ЕНТ (шкала 140) по накопленным результатам. */
+  async getEntProgress(req: Request, res: Response): Promise<void> {
+    success(res, await entProgressService.getEntProgress(this.userId(req)));
+  }
+
+  /** GET /users/me/achievements — статусы достижений (id из каталога клиента). */
+  async getAchievements(req: Request, res: Response): Promise<void> {
+    success(res, await achievementsService.getAchievements(this.userId(req)));
+  }
+
+  /** GET /users/me/score — серверный счёт баллов (тесты + solo + live). */
+  async getMyScore(req: Request, res: Response): Promise<void> {
+    success(res, await scoreService.getMyScore(this.userId(req)));
   }
 
   /**

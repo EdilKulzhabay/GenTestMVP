@@ -1,20 +1,17 @@
 import { Subject, User, ProfileSubjectPair } from '../models';
 import { AppError } from '../utils';
+import { ENT_MAIN_BLOCKS, ENT_PROFILE_BLOCK, entBlockLabel } from '../config/entScale';
+
 /** Порядок и объём как в едином национальном тестировании (Казахстан) — в формате вопросов ЕНТ */
-const MAIN_TRIAL_TITLES = [
-  'История Казахстана',
-  'Математическая грамотность',
-  'Грамотность чтения'
-] as const;
+const MAIN_TRIAL_TITLES = ENT_MAIN_BLOCKS.map(b => b.title);
 
 const MAIN_TRIAL_BLOCKS: Array<{
   questionCount: number;
   blockLabel: string;
-}> = [
-  { questionCount: 20, blockLabel: 'История Казахстана: 20 вопросов (20 баллов)' },
-  { questionCount: 10, blockLabel: 'Математическая грамотность: 10 вопросов (10 баллов)' },
-  { questionCount: 10, blockLabel: 'Грамотность чтения: 10 вопросов (10 баллов)' }
-];
+}> = ENT_MAIN_BLOCKS.map(b => ({
+  questionCount: b.questionCount,
+  blockLabel: entBlockLabel(b.title, b.questionCount, b.points)
+}));
 
 function assertSubjectNodeForTrial(subj: any, needTitle: string) {
   const book = subj.books?.[0];
@@ -77,8 +74,8 @@ export class TrialService {
       trialMainsOk,
       entTrialInfo: {
         mainBlocks: MAIN_TRIAL_BLOCKS,
-        profileBlockPoints: 50,
-        profileBlockQuestions: 40
+        profileBlockPoints: ENT_PROFILE_BLOCK.points,
+        profileBlockQuestions: ENT_PROFILE_BLOCK.questionCount
       }
     };
   }
@@ -149,8 +146,8 @@ export class TrialService {
         chapterId: meta.chapterId,
         chapterTitle: meta.chapterTitle,
         topicTitle: meta.topicTitle,
-        questionCount: 40,
-        trialBlockLabel: `${t}: 40 вопросов (50 баллов)`,
+        questionCount: ENT_PROFILE_BLOCK.questionCount,
+        trialBlockLabel: entBlockLabel(t, ENT_PROFILE_BLOCK.questionCount, ENT_PROFILE_BLOCK.points),
         useFullBook: true
       });
     }

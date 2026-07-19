@@ -9,13 +9,14 @@ import {
   ICanonicalRoadmapNode,
   ICanonicalNodeLesson,
   IRoadmapLessonListItem,
-  IRoadmapLessonResponse
+  IRoadmapLessonResponse,
 } from '../types/roadmap.types';
 import {
   resolveNodeLessons,
   nodeLessonIds,
   describeNodeSources,
-  persistNodeLessonSummary
+  resolveNodeAssets,
+  persistNodeLessonSummary,
 } from './nodeLessonContent.service';
 import { roadmapAIService } from './roadmap.ai.service';
 import { roadmapService } from './roadmap.service';
@@ -55,7 +56,7 @@ async function persistLessonSummary(
   const doc = await CanonicalRoadmap.findOne({ subjectId: subjectOid }).sort({ version: -1 });
   if (!doc) return;
 
-  const updatedNodes = doc.nodes.map((n) => {
+  const updatedNodes = doc.nodes.map(n => {
     if (n.nodeId !== nodeId) return n;
     const meta =
       n.metadata && typeof n.metadata === 'object' && n.metadata !== null
@@ -64,7 +65,7 @@ async function persistLessonSummary(
 
     // metadata.lessons[] — обновляем урок по lessonId
     if (Array.isArray(meta.lessons)) {
-      meta.lessons = (meta.lessons as Array<Record<string, unknown>>).map((l) =>
+      meta.lessons = (meta.lessons as Array<Record<string, unknown>>).map(l =>
         l && l.lessonId === lessonId ? { ...l, summary } : l
       );
     }
@@ -99,7 +100,7 @@ function lessonListItems(
 class RoadmapLessonService {
   private async resolveNode(subjectId: string, nodeId: string): Promise<ICanonicalRoadmapNode> {
     const bundle = await roadmapService.resolveCanonical(subjectId);
-    const node = bundle.nodes.find((n) => n.nodeId === nodeId);
+    const node = bundle.nodes.find(n => n.nodeId === nodeId);
     if (!node) throw AppError.notFound('Roadmap node not found for this subject');
     return node;
   }
@@ -121,15 +122,15 @@ class RoadmapLessonService {
 
     const progress = await roadmapService.getNodeProgress(userId, subjectId, nodeId);
     const readAtByLesson = new Map<string, Date | undefined>(
-      (progress?.lessons ?? []).map((l) => [l.lessonId, l.readAt])
+      (progress?.lessons ?? []).map(l => [l.lessonId, l.readAt])
     );
     const completedSet = new Set([...readAtByLesson.keys()]);
     const listItems = lessonListItems(lessons, completedSet);
 
     // Целевой урок: явный lessonId → он; иначе первый незавершённый; иначе первый.
-    let targetIdx = lessonId ? lessons.findIndex((l) => l.lessonId === lessonId) : -1;
+    let targetIdx = lessonId ? lessons.findIndex(l => l.lessonId === lessonId) : -1;
     if (targetIdx < 0 && !lessonId) {
-      targetIdx = lessons.findIndex((l) => !completedSet.has(l.lessonId));
+      targetIdx = lessons.findIndex(l => !completedSet.has(l.lessonId));
     }
     if (targetIdx < 0) targetIdx = 0;
     const target = lessons[targetIdx];
@@ -141,7 +142,7 @@ class RoadmapLessonService {
       summary = await roadmapAIService.generateLessonSummary({
         subjectTitle: subject.title,
         nodeTitle: target.title || node.title,
-        lessonText: contentNormalized
+        lessonText: contentNormalized,
       });
       if (summary) {
         // live-КТП: пишем summary в NodeLessonContent (иначе регенерация на каждый просмотр).
@@ -151,12 +152,12 @@ class RoadmapLessonService {
           node,
           target.lessonId,
           summary
-        ).catch((e) => {
+        ).catch(e => {
           console.warn('[roadmapLesson] persist summary (cache) failed', e);
           return false;
         });
         if (!persistedToCache) {
-          await persistLessonSummary(subjectId, nodeId, target.lessonId, summary).catch((e) =>
+          await persistLessonSummary(subjectId, nodeId, target.lessonId, summary).catch(e =>
             console.warn('[roadmapLesson] persist summary failed', e)
           );
         }
@@ -181,7 +182,8 @@ class RoadmapLessonService {
       nextLessonId: targetIdx < lessons.length - 1 ? lessons[targetIdx + 1].lessonId : null,
       prevLessonId: targetIdx > 0 ? lessons[targetIdx - 1].lessonId : null,
       locked: listItems[targetIdx]?.locked ?? false,
-      sources: describeNodeSources(subject, node)
+      sources: describeNodeSources(subject, node),
+      assets: resolveNodeAssets(subject, node),
     };
   }
 
@@ -194,7 +196,12 @@ class RoadmapLessonService {
     subjectId: string,
     nodeId: string,
     lessonId?: string
-  ): Promise<{ readCompletedAt: string; lessonId: string; allCompleted: boolean; nextLessonId: string | null }> {
+  ): Promise<{
+    readCompletedAt: string;
+    lessonId: string;
+    allCompleted: boolean;
+    nextLessonId: string | null;
+  }> {
     if (!mongoose.isValidObjectId(subjectId)) throw AppError.badRequest('Invalid subjectId');
 
     const node = await this.resolveNode(subjectId, nodeId);
@@ -204,8 +211,8 @@ class RoadmapLessonService {
     let targetId = lessonId?.trim();
     if (!targetId) {
       const progress = await roadmapService.getNodeProgress(userId, subjectId, nodeId);
-      const completed = new Set((progress?.lessons ?? []).map((l) => l.lessonId));
-      targetId = lessonIds.find((id) => !completed.has(id)) ?? lessonIds[lessonIds.length - 1];
+      const completed = new Set((progress?.lessons ?? []).map(l => l.lessonId));
+      targetId = lessonIds.find(id => !completed.has(id)) ?? lessonIds[lessonIds.length - 1];
     }
 
     // Валидация lessonId и последовательный гейтинг — в markLessonComplete.
@@ -231,7 +238,7 @@ class RoadmapLessonService {
     const node = await this.resolveNode(subjectId, nodeId);
     const lessons = await resolveNodeLessons(subjectId, subject, node);
     const lesson =
-      (input.lessonId && lessons.find((l) => l.lessonId === input.lessonId)) || lessons[0];
+      (input.lessonId && lessons.find(l => l.lessonId === input.lessonId)) || lessons[0];
     const lessonText = lesson ? normalizeLessonContent(lesson.content, lesson.contentFormat) : '';
 
     const images: Array<{ mimeType: string; base64: string }> = [];
@@ -242,7 +249,7 @@ class RoadmapLessonService {
         _id: id,
         userId,
         subjectId,
-        nodeId
+        nodeId,
       }).lean();
       if (!att) throw AppError.badRequest(`Attachment not found: ${id}`);
       if (att.sizeBytes > ROADMAP_CHAT_MAX_BYTES) throw AppError.badRequest('Attachment too large');
@@ -251,7 +258,7 @@ class RoadmapLessonService {
       const buf = await fs.readFile(abs);
       images.push({
         mimeType: att.mimeType,
-        base64: buf.toString('base64')
+        base64: buf.toString('base64'),
       });
     }
 
@@ -261,7 +268,7 @@ class RoadmapLessonService {
       nodeDescription: node.description?.trim(),
       lessonText,
       userMessage: trimmed,
-      ...(images.length ? { images } : {})
+      ...(images.length ? { images } : {}),
     });
 
     return { reply };
@@ -278,7 +285,7 @@ class RoadmapLessonService {
     sizeBytes: number;
   }): Promise<{ attachmentId: string }> {
     const bundle = await roadmapService.resolveCanonical(input.subjectId);
-    if (!bundle.nodes.some((n) => n.nodeId === input.nodeId)) {
+    if (!bundle.nodes.some(n => n.nodeId === input.nodeId)) {
       await fs.unlink(input.absolutePath).catch(() => undefined);
       throw AppError.notFound('Roadmap node not found for this subject');
     }
@@ -292,7 +299,7 @@ class RoadmapLessonService {
       mimeType: input.mimeType,
       sizeBytes: input.sizeBytes,
       storageRelativePath: rel,
-      originalName: input.originalName.slice(0, 512)
+      originalName: input.originalName.slice(0, 512),
     });
     return { attachmentId: input.attachmentId.toString() };
   }

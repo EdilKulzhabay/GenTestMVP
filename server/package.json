@@ -13,7 +13,11 @@
     "seed:subjects:update": "ts-node src/scripts/seedSubjects.ts --update",
     "seed:pairs": "ts-node src/scripts/seedProfileSubjectPairs.ts",
     "seed:catalog": "npm run seed:subjects && npm run seed:pairs",
-    "cleanup:legacy-history": "ts-node src/scripts/cleanupLegacyTestHistory.ts"
+    "cleanup:legacy-history": "ts-node src/scripts/cleanupLegacyTestHistory.ts",
+    "backfill:assets": "ts-node src/scripts/backfillAssets.ts",
+    "backfill:assets:apply": "ts-node src/scripts/backfillAssets.ts --apply",
+    "gc:uploads": "ts-node src/scripts/gcAbandonedUploads.ts",
+    "gc:uploads:apply": "ts-node src/scripts/gcAbandonedUploads.ts --apply"
   },
   "keywords": [
     "education",

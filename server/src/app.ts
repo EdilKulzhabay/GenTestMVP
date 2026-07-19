@@ -1,3 +1,4 @@
+import path from 'path';
 import express, { Application } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -13,15 +14,15 @@ import { success } from './utils';
 /**
  * EXPRESS APPLICATION SETUP
  * Конфигурация Express приложения
- * 
+ *
  * Middleware:
  * - cors: разрешает кросс-доменные запросы
  * - express.json: парсинг JSON в body
  * - express.urlencoded: парсинг URL-encoded данных
- * 
+ *
  * Routes:
  * - /api/v1/*: все API эндпоинты
- * 
+ *
  * Error handling:
  * - notFound: обработка несуществующих маршрутов (404)
  * - errorHandler: централизованная обработка ошибок
@@ -56,7 +57,7 @@ app.get('/', (_req, res) => {
     message: 'Educational AI Test Platform API',
     version: '1.0.0',
     documentation: `${API_BASE_PATH}/health`,
-    apiDocs: '/api-docs'
+    apiDocs: '/api-docs',
   });
 });
 
@@ -65,13 +66,20 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // Отладка: GET /api/v1/debug — показывает, что запрос доходит до сервера
 app.get(`${API_BASE_PATH}/debug`, (req, res) => {
-  success(res, {
-    path: req.path,
-    originalUrl: req.originalUrl,
-    baseUrl: req.baseUrl,
-    method: req.method
-  }, 'API reachable');
+  success(
+    res,
+    {
+      path: req.path,
+      originalUrl: req.originalUrl,
+      baseUrl: req.baseUrl,
+      method: req.method,
+    },
+    'API reachable'
+  );
 });
+
+// Статика загруженных файлов (изображения ассетов). Под API_BASE_PATH, чтобы reverse-proxy /api/v1 их отдавал.
+app.use(`${API_BASE_PATH}/uploads`, express.static(path.join(process.cwd(), 'uploads')));
 
 // API routes
 app.use(API_BASE_PATH, routes);

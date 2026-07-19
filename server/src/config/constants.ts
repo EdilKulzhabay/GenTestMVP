@@ -46,6 +46,9 @@ export const API_PATHS = {
   USERS: {
     ME: `${ROUTES.USERS}/me`,
     ME_PROFILE_STATS: `${ROUTES.USERS}/me/profile-stats`,
+    ME_ENT_PROGRESS: `${ROUTES.USERS}/me/ent-progress`,
+    ME_ACHIEVEMENTS: `${ROUTES.USERS}/me/achievements`,
+    ME_SCORE: `${ROUTES.USERS}/me/score`,
     ME_TESTS: `${ROUTES.USERS}/me/tests`,
     ME_STATS: `${ROUTES.USERS}/me/stats`,
     ME_TEST_DETAILS: `${ROUTES.USERS}/me/tests/:testHistoryId`,

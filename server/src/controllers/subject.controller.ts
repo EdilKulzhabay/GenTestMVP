@@ -12,25 +12,56 @@ import {
   ProfileSubjectPair,
   User,
   KtpCatalog,
-  NodeLessonContent
+  NodeLessonContent,
 } from '../models';
 import {
   ICreateSubjectDTO,
   IAddBookDTO,
   IAddChapterDTO,
   IAddTopicDTO,
-  IAddParagraphDTO
+  IAddParagraphDTO,
+  IContentAsset,
 } from '../types';
+import fs from 'fs/promises';
 import { success, AppError } from '../utils';
+import { API_BASE_PATH } from '../config/constants';
+import { enrichImageAssetInBackground } from '../services/asset.ai.service';
+import { assetSubjectDir, localDiskPathFromUrl } from '../middlewares/assetUpload.middleware';
+import { collectPlacedAssetIds } from '../utils/assetToken.util';
+
+/** Серверные поля ассета (не принимаем от клиента; переносим только при неизменном изображении). */
+const SERVER_DERIVED_ASSET_FIELDS = [
+  'enrichment',
+  'embedding',
+  'llmDescription',
+  'ocrText',
+  'webpUrl',
+  'width',
+  'height',
+] as const;
+
+/** Best-effort удаление локального файла ассета по URL (внешние URL игнорируются). */
+async function unlinkAssetFileByUrl(url: string | undefined): Promise<void> {
+  const diskPath = url ? localDiskPathFromUrl(url) : null;
+  if (diskPath) await fs.unlink(diskPath).catch(() => undefined);
+}
 
 /**
  * Проверяет, что posted — перестановка existing (тот же набор id, без пропусков/дублей/чужих).
  * Иначе reorder мог бы молча потерять элементы или продублировать order.
  */
-function assertPermutation(posted: string[], existing: (string | undefined)[], field: string): void {
+function assertPermutation(
+  posted: string[],
+  existing: (string | undefined)[],
+  field: string
+): void {
   const have = existing.filter((id): id is string => Boolean(id));
   const postedSet = new Set(posted);
-  if (posted.length !== have.length || postedSet.size !== posted.length || !have.every((id) => postedSet.has(id))) {
+  if (
+    posted.length !== have.length ||
+    postedSet.size !== posted.length ||
+    !have.every(id => postedSet.has(id))
+  ) {
     throw AppError.badRequest(`${field} must list exactly the existing ids once each`);
   }
 }
@@ -49,7 +80,7 @@ class SubjectController {
       title,
       description,
       subjectKind: subjectKind === 'profile' ? 'profile' : 'main',
-      books: []
+      books: [],
     });
     success(res, subject, 'Subject created successfully', 201);
   }
@@ -75,23 +106,28 @@ class SubjectController {
           $set: {
             description: description != null ? String(description).trim() : existing.description,
             subjectKind,
-            books: booksArr
-          }
+            books: booksArr,
+          },
         }
       );
       const subject = await Subject.findById(existing._id);
       if (!subject) throw AppError.notFound('Subject not found');
       const bookCount = subject.books?.length ?? 0;
-      const chapterCount = subject.books.reduce((s: number, b: any) => s + (b.chapters?.length ?? 0), 0);
+      const chapterCount = subject.books.reduce(
+        (s: number, b: any) => s + (b.chapters?.length ?? 0),
+        0
+      );
       const topicCount = subject.books.reduce(
-        (s: number, b: any) => s + b.chapters.reduce((cs: number, c: any) => cs + (c.topics?.length ?? 0), 0),
+        (s: number, b: any) =>
+          s + b.chapters.reduce((cs: number, c: any) => cs + (c.topics?.length ?? 0), 0),
         0
       );
       const paragraphCount = subject.books.reduce(
         (s: number, b: any) =>
           s +
           b.chapters.reduce(
-            (cs: number, c: any) => cs + c.topics.reduce((ts: number, t: any) => ts + (t.paragraphs?.length ?? 0), 0),
+            (cs: number, c: any) =>
+              cs + c.topics.reduce((ts: number, t: any) => ts + (t.paragraphs?.length ?? 0), 0),
             0
           ),
         0
@@ -100,7 +136,12 @@ class SubjectController {
         res,
         {
           subject,
-          stats: { books: bookCount, chapters: chapterCount, topics: topicCount, paragraphs: paragraphCount }
+          stats: {
+            books: bookCount,
+            chapters: chapterCount,
+            topics: topicCount,
+            paragraphs: paragraphCount,
+          },
         },
         'Subject updated from import',
         200
@@ -108,33 +149,50 @@ class SubjectController {
       return;
     }
 
-    const subjectKind =
-      req.body?.subjectKind === 'profile' ? 'profile' : 'main';
+    const subjectKind = req.body?.subjectKind === 'profile' ? 'profile' : 'main';
 
     const subject = await Subject.create({
       title: title.trim(),
       description: description || '',
       subjectKind,
-      books: books || []
+      books: books || [],
     });
 
     const bookCount = subject.books?.length ?? 0;
-    const chapterCount = subject.books.reduce((s: number, b: any) => s + (b.chapters?.length ?? 0), 0);
+    const chapterCount = subject.books.reduce(
+      (s: number, b: any) => s + (b.chapters?.length ?? 0),
+      0
+    );
     const topicCount = subject.books.reduce(
-      (s: number, b: any) => s + b.chapters.reduce((cs: number, c: any) => cs + (c.topics?.length ?? 0), 0), 0
+      (s: number, b: any) =>
+        s + b.chapters.reduce((cs: number, c: any) => cs + (c.topics?.length ?? 0), 0),
+      0
     );
     const paragraphCount = subject.books.reduce(
-      (s: number, b: any) => s + b.chapters.reduce(
-        (cs: number, c: any) => cs + c.topics.reduce(
-          (ts: number, t: any) => ts + (t.paragraphs?.length ?? 0), 0
-        ), 0
-      ), 0
+      (s: number, b: any) =>
+        s +
+        b.chapters.reduce(
+          (cs: number, c: any) =>
+            cs + c.topics.reduce((ts: number, t: any) => ts + (t.paragraphs?.length ?? 0), 0),
+          0
+        ),
+      0
     );
 
-    success(res, {
-      subject,
-      stats: { books: bookCount, chapters: chapterCount, topics: topicCount, paragraphs: paragraphCount }
-    }, `Imported: ${bookCount} books, ${chapterCount} chapters, ${topicCount} topics, ${paragraphCount} paragraphs`, 201);
+    success(
+      res,
+      {
+        subject,
+        stats: {
+          books: bookCount,
+          chapters: chapterCount,
+          topics: topicCount,
+          paragraphs: paragraphCount,
+        },
+      },
+      `Imported: ${bookCount} books, ${chapterCount} chapters, ${topicCount} topics, ${paragraphCount} paragraphs`,
+      201
+    );
   }
 
   /** GET /subjects — опционально ?subjectKind=main|profile (каталог для выбора профильных пар) */
@@ -154,6 +212,67 @@ class SubjectController {
     success(res, subject);
   }
 
+  /**
+   * GET /subjects/:subjectId/assets — плоский список ассетов предмета с хлебными крошками
+   * (book/chapter/topic) и флагом placed (есть ли placement-токен в прозе). Для admin-библиотеки.
+   * Опционально ?kind=table|image|formula|problem.
+   */
+  async listSubjectAssets(req: Request, res: Response): Promise<void> {
+    const id = String(req.params.subjectId);
+    if (!mongoose.isValidObjectId(id)) throw AppError.badRequest('Invalid subject id');
+    const kindFilter = typeof req.query.kind === 'string' ? req.query.kind : undefined;
+
+    const subject = await Subject.findById(id, {
+      title: 1,
+      'books._id': 1,
+      'books.title': 1,
+      'books.chapters._id': 1,
+      'books.chapters.title': 1,
+      'books.chapters.topics._id': 1,
+      'books.chapters.topics.title': 1,
+      'books.chapters.topics.assets': 1,
+      'books.chapters.topics.paragraphs.content.text': 1,
+    }).lean();
+    if (!subject) throw AppError.notFound('Subject not found');
+
+    const items: Record<string, unknown>[] = [];
+    const byKind: Record<string, number> = {};
+    for (const book of subject.books ?? []) {
+      for (const chapter of book.chapters ?? []) {
+        for (const topic of chapter.topics ?? []) {
+          const placed = new Set<string>();
+          for (const paragraph of topic.paragraphs ?? []) {
+            for (const pid of collectPlacedAssetIds(paragraph.content?.text ?? '')) placed.add(pid);
+          }
+          for (const asset of topic.assets ?? []) {
+            if (kindFilter && asset.kind !== kindFilter) continue;
+            byKind[asset.kind] = (byKind[asset.kind] ?? 0) + 1;
+            items.push({
+              ...asset,
+              placed: asset._id ? placed.has(String(asset._id)) : false,
+              breadcrumb: {
+                bookId: String(book._id),
+                bookTitle: book.title,
+                chapterId: String(chapter._id),
+                chapterTitle: chapter.title,
+                topicId: String(topic._id),
+                topicTitle: topic.title,
+              },
+            });
+          }
+        }
+      }
+    }
+
+    success(res, {
+      subjectId: id,
+      title: subject.title,
+      total: items.length,
+      byKind,
+      assets: items,
+    });
+  }
+
   /** POST /subjects/:id/books */
   async addBook(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.id);
@@ -162,7 +281,7 @@ class SubjectController {
       title,
       author,
       contentLanguage: contentLanguage?.trim() || undefined,
-      chapters: []
+      chapters: [],
     });
     await subject.save();
     success(res, subject, 'Book added successfully', 201);
@@ -181,7 +300,7 @@ class SubjectController {
       title: book.title.trim(),
       author: book.author?.trim() || undefined,
       contentLanguage: book.contentLanguage?.trim() || undefined,
-      chapters: Array.isArray(book.chapters) ? book.chapters : []
+      chapters: Array.isArray(book.chapters) ? book.chapters : [],
     } as never);
     await subject.save();
     success(res, subject, 'Book imported successfully', 201);
@@ -193,7 +312,7 @@ class SubjectController {
     if (!subjectId) throw AppError.badRequest('subjectId is required in query params');
 
     const subject = await this.findSubject(String(subjectId));
-    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
     if (!book) throw AppError.notFound('Book not found');
 
     const { title }: IAddChapterDTO = req.body;
@@ -206,12 +325,13 @@ class SubjectController {
   /** POST /subjects/chapters/:chapterId/topics */
   async addTopic(req: Request, res: Response): Promise<void> {
     const { subjectId, bookId } = req.query;
-    if (!subjectId || !bookId) throw AppError.badRequest('subjectId and bookId are required in query params');
+    if (!subjectId || !bookId)
+      throw AppError.badRequest('subjectId and bookId are required in query params');
 
     const subject = await this.findSubject(String(subjectId));
-    const book = subject.books.find((b) => b._id?.toString() === String(bookId));
+    const book = subject.books.find(b => b._id?.toString() === String(bookId));
     if (!book) throw AppError.notFound('Book not found');
-    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    const chapter = book.chapters.find(c => c._id?.toString() === req.params.chapterId);
     if (!chapter) throw AppError.notFound('Chapter not found');
 
     const { title }: IAddTopicDTO = req.body;
@@ -228,11 +348,11 @@ class SubjectController {
     }
 
     const subject = await this.findSubject(String(subjectId));
-    const book = subject.books.find((b) => b._id?.toString() === String(bookId));
+    const book = subject.books.find(b => b._id?.toString() === String(bookId));
     if (!book) throw AppError.notFound('Book not found');
-    const chapter = book.chapters.find((c) => c._id?.toString() === String(chapterId));
+    const chapter = book.chapters.find(c => c._id?.toString() === String(chapterId));
     if (!chapter) throw AppError.notFound('Chapter not found');
-    const topic = chapter.topics.find((t) => t._id?.toString() === req.params.topicId);
+    const topic = chapter.topics.find(t => t._id?.toString() === req.params.topicId);
     if (!topic) throw AppError.notFound('Topic not found');
 
     const { order, content }: IAddParagraphDTO = req.body;
@@ -269,7 +389,11 @@ class SubjectController {
       return;
     }
 
-    const subject = await Subject.findByIdAndUpdate(id, { $set }, { new: true, runValidators: true });
+    const subject = await Subject.findByIdAndUpdate(
+      id,
+      { $set },
+      { new: true, runValidators: true }
+    );
     if (!subject) throw AppError.notFound('Subject not found');
     success(res, subject, 'Subject updated');
   }
@@ -286,7 +410,7 @@ class SubjectController {
     if (!exists) throw AppError.notFound('Subject not found');
 
     const tests = await Test.find({ subjectId: oid }).select('_id').lean();
-    const testIds = tests.map((t) => t._id);
+    const testIds = tests.map(t => t._id);
     if (testIds.length) {
       await SoloSession.deleteMany({ testId: { $in: testIds } });
     }
@@ -300,25 +424,32 @@ class SubjectController {
     await RoadmapChatAttachment.deleteMany({ subjectId: oid });
 
     const affectedPairs = await ProfileSubjectPair.find({
-      $or: [{ subject1Id: oid }, { subject2Id: oid }]
+      $or: [{ subject1Id: oid }, { subject2Id: oid }],
     })
       .select('_id')
       .lean();
-    const pairIds = affectedPairs.map((p) => p._id);
+    const pairIds = affectedPairs.map(p => p._id);
     if (pairIds.length) {
-      await User.updateMany({ profileSubjectPairId: { $in: pairIds } }, { $unset: { profileSubjectPairId: 1 } });
+      await User.updateMany(
+        { profileSubjectPairId: { $in: pairIds } },
+        { $unset: { profileSubjectPairId: 1 } }
+      );
     }
     await ProfileSubjectPair.deleteMany({ $or: [{ subject1Id: oid }, { subject2Id: oid }] });
 
-    await User.updateMany({ 'testHistory.subjectId': oid }, { $pull: { testHistory: { subjectId: oid } } });
+    await User.updateMany(
+      { 'testHistory.subjectId': oid },
+      { $pull: { testHistory: { subjectId: oid } } }
+    );
 
     await Subject.deleteOne({ _id: oid });
+    await fs.rm(assetSubjectDir(id), { recursive: true, force: true }).catch(() => undefined);
     success(res, { deleted: true }, 'Subject deleted');
   }
 
   async updateBook(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.subjectId);
-    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
     if (!book) throw AppError.notFound('Book not found');
     const { title, author, contentLanguage } = req.body;
     if (title !== undefined) book.title = title.trim();
@@ -330,7 +461,7 @@ class SubjectController {
 
   async deleteBook(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.subjectId);
-    const idx = subject.books.findIndex((b) => b._id?.toString() === req.params.bookId);
+    const idx = subject.books.findIndex(b => b._id?.toString() === req.params.bookId);
     if (idx === -1) throw AppError.notFound('Book not found');
     subject.books.splice(idx, 1);
     await subject.save();
@@ -339,9 +470,9 @@ class SubjectController {
 
   async updateChapter(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.subjectId);
-    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
     if (!book) throw AppError.notFound('Book not found');
-    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    const chapter = book.chapters.find(c => c._id?.toString() === req.params.chapterId);
     if (!chapter) throw AppError.notFound('Chapter not found');
     const { title, order } = req.body;
     if (title !== undefined) chapter.title = title.trim();
@@ -352,9 +483,9 @@ class SubjectController {
 
   async deleteChapter(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.subjectId);
-    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
     if (!book) throw AppError.notFound('Book not found');
-    const idx = book.chapters.findIndex((c) => c._id?.toString() === req.params.chapterId);
+    const idx = book.chapters.findIndex(c => c._id?.toString() === req.params.chapterId);
     if (idx === -1) throw AppError.notFound('Chapter not found');
     book.chapters.splice(idx, 1);
     await subject.save();
@@ -363,11 +494,11 @@ class SubjectController {
 
   async updateTopic(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.subjectId);
-    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
     if (!book) throw AppError.notFound('Book not found');
-    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    const chapter = book.chapters.find(c => c._id?.toString() === req.params.chapterId);
     if (!chapter) throw AppError.notFound('Chapter not found');
-    const topic = chapter.topics.find((t) => t._id?.toString() === req.params.topicId);
+    const topic = chapter.topics.find(t => t._id?.toString() === req.params.topicId);
     if (!topic) throw AppError.notFound('Topic not found');
     const { title } = req.body;
     if (title !== undefined) topic.title = title.trim();
@@ -378,13 +509,13 @@ class SubjectController {
   /** PATCH /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/paragraphs/:paragraphId */
   async updateParagraph(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.subjectId);
-    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
     if (!book) throw AppError.notFound('Book not found');
-    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    const chapter = book.chapters.find(c => c._id?.toString() === req.params.chapterId);
     if (!chapter) throw AppError.notFound('Chapter not found');
-    const topic = chapter.topics.find((t) => t._id?.toString() === req.params.topicId);
+    const topic = chapter.topics.find(t => t._id?.toString() === req.params.topicId);
     if (!topic) throw AppError.notFound('Topic not found');
-    const paragraph = topic.paragraphs.find((p) => p._id?.toString() === req.params.paragraphId);
+    const paragraph = topic.paragraphs.find(p => p._id?.toString() === req.params.paragraphId);
     if (!paragraph) throw AppError.notFound('Paragraph not found');
 
     const { order, content } = req.body;
@@ -397,13 +528,18 @@ class SubjectController {
   /** POST /subjects/:subjectId/books/:bookId/chapters/reorder { orderedChapterIds } */
   async reorderChapters(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.subjectId);
-    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
     if (!book) throw AppError.notFound('Book not found');
     const { orderedChapterIds } = req.body as { orderedChapterIds?: string[] };
-    if (!Array.isArray(orderedChapterIds)) throw AppError.badRequest('orderedChapterIds must be an array');
-    assertPermutation(orderedChapterIds, book.chapters.map((c) => c._id?.toString()), 'orderedChapterIds');
+    if (!Array.isArray(orderedChapterIds))
+      throw AppError.badRequest('orderedChapterIds must be an array');
+    assertPermutation(
+      orderedChapterIds,
+      book.chapters.map(c => c._id?.toString()),
+      'orderedChapterIds'
+    );
     orderedChapterIds.forEach((id, i) => {
-      const ch = book.chapters.find((c) => c._id?.toString() === id);
+      const ch = book.chapters.find(c => c._id?.toString() === id);
       if (ch) ch.order = i;
     });
     await subject.save();
@@ -413,15 +549,20 @@ class SubjectController {
   /** POST /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/reorder { orderedTopicIds } */
   async reorderTopics(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.subjectId);
-    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
     if (!book) throw AppError.notFound('Book not found');
-    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    const chapter = book.chapters.find(c => c._id?.toString() === req.params.chapterId);
     if (!chapter) throw AppError.notFound('Chapter not found');
     const { orderedTopicIds } = req.body as { orderedTopicIds?: string[] };
-    if (!Array.isArray(orderedTopicIds)) throw AppError.badRequest('orderedTopicIds must be an array');
-    assertPermutation(orderedTopicIds, chapter.topics.map((t) => t._id?.toString()), 'orderedTopicIds');
+    if (!Array.isArray(orderedTopicIds))
+      throw AppError.badRequest('orderedTopicIds must be an array');
+    assertPermutation(
+      orderedTopicIds,
+      chapter.topics.map(t => t._id?.toString()),
+      'orderedTopicIds'
+    );
     orderedTopicIds.forEach((id, i) => {
-      const t = chapter.topics.find((tp) => tp._id?.toString() === id);
+      const t = chapter.topics.find(tp => tp._id?.toString() === id);
       if (t) t.order = i;
     });
     await subject.save();
@@ -431,17 +572,22 @@ class SubjectController {
   /** POST /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/paragraphs/reorder { orderedParagraphIds } */
   async reorderParagraphs(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.subjectId);
-    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
     if (!book) throw AppError.notFound('Book not found');
-    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    const chapter = book.chapters.find(c => c._id?.toString() === req.params.chapterId);
     if (!chapter) throw AppError.notFound('Chapter not found');
-    const topic = chapter.topics.find((t) => t._id?.toString() === req.params.topicId);
+    const topic = chapter.topics.find(t => t._id?.toString() === req.params.topicId);
     if (!topic) throw AppError.notFound('Topic not found');
     const { orderedParagraphIds } = req.body as { orderedParagraphIds?: string[] };
-    if (!Array.isArray(orderedParagraphIds)) throw AppError.badRequest('orderedParagraphIds must be an array');
-    assertPermutation(orderedParagraphIds, topic.paragraphs.map((p) => p._id?.toString()), 'orderedParagraphIds');
+    if (!Array.isArray(orderedParagraphIds))
+      throw AppError.badRequest('orderedParagraphIds must be an array');
+    assertPermutation(
+      orderedParagraphIds,
+      topic.paragraphs.map(p => p._id?.toString()),
+      'orderedParagraphIds'
+    );
     orderedParagraphIds.forEach((id, i) => {
-      const p = topic.paragraphs.find((pp) => pp._id?.toString() === id);
+      const p = topic.paragraphs.find(pp => pp._id?.toString() === id);
       if (p) p.order = i;
     });
     await subject.save();
@@ -454,37 +600,37 @@ class SubjectController {
    */
   async setTopicKtp(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.subjectId);
-    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
     if (!book) throw AppError.notFound('Book not found');
-    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    const chapter = book.chapters.find(c => c._id?.toString() === req.params.chapterId);
     if (!chapter) throw AppError.notFound('Chapter not found');
-    const topic = chapter.topics.find((t) => t._id?.toString() === req.params.topicId);
+    const topic = chapter.topics.find(t => t._id?.toString() === req.params.topicId);
     if (!topic) throw AppError.notFound('Topic not found');
 
     const { ktpTopicIds } = req.body as { ktpTopicIds?: string[] };
-    const ids = Array.isArray(ktpTopicIds) ? [...new Set(ktpTopicIds.map((x) => String(x)))] : [];
+    const ids = Array.isArray(ktpTopicIds) ? [...new Set(ktpTopicIds.map(x => String(x)))] : [];
 
     if (ids.length > 0) {
       const ktp = await KtpCatalog.findOne({ subjectId: subject._id }).lean();
-      const known = new Set((ktp?.topics ?? []).map((t) => String(t._id)));
-      const unknown = ids.filter((id) => !known.has(id));
+      const known = new Set((ktp?.topics ?? []).map(t => String(t._id)));
+      const unknown = ids.filter(id => !known.has(id));
       if (unknown.length > 0) {
         throw AppError.badRequest(`Темы КТП не найдены в справочнике: ${unknown.join(', ')}`);
       }
     }
 
-    topic.ktpTopicIds = ids.map((id) => new mongoose.Types.ObjectId(id));
+    topic.ktpTopicIds = ids.map(id => new mongoose.Types.ObjectId(id));
     await subject.save();
     success(res, subject, 'Маппинг темы на КТП сохранён');
   }
 
   async deleteTopic(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.subjectId);
-    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
     if (!book) throw AppError.notFound('Book not found');
-    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    const chapter = book.chapters.find(c => c._id?.toString() === req.params.chapterId);
     if (!chapter) throw AppError.notFound('Chapter not found');
-    const idx = chapter.topics.findIndex((t) => t._id?.toString() === req.params.topicId);
+    const idx = chapter.topics.findIndex(t => t._id?.toString() === req.params.topicId);
     if (idx === -1) throw AppError.notFound('Topic not found');
     chapter.topics.splice(idx, 1);
     await subject.save();
@@ -493,17 +639,156 @@ class SubjectController {
 
   async deleteParagraph(req: Request, res: Response): Promise<void> {
     const subject = await this.findSubject(req.params.subjectId);
-    const book = subject.books.find((b) => b._id?.toString() === req.params.bookId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
     if (!book) throw AppError.notFound('Book not found');
-    const chapter = book.chapters.find((c) => c._id?.toString() === req.params.chapterId);
+    const chapter = book.chapters.find(c => c._id?.toString() === req.params.chapterId);
     if (!chapter) throw AppError.notFound('Chapter not found');
-    const topic = chapter.topics.find((t) => t._id?.toString() === req.params.topicId);
+    const topic = chapter.topics.find(t => t._id?.toString() === req.params.topicId);
     if (!topic) throw AppError.notFound('Topic not found');
-    const idx = topic.paragraphs.findIndex((p) => p._id?.toString() === req.params.paragraphId);
+    const idx = topic.paragraphs.findIndex(p => p._id?.toString() === req.params.paragraphId);
     if (idx === -1) throw AppError.notFound('Paragraph not found');
     topic.paragraphs.splice(idx, 1);
     await subject.save();
     success(res, subject, 'Paragraph deleted');
+  }
+
+  /** POST /subjects/topics/:topicId/assets — добавить ассет темы (server минтит _id). */
+  async addAsset(req: Request, res: Response): Promise<void> {
+    const { subjectId, bookId, chapterId } = req.query;
+    if (!subjectId || !bookId || !chapterId) {
+      throw AppError.badRequest('subjectId, bookId, and chapterId are required in query params');
+    }
+    const subject = await this.findSubject(String(subjectId));
+    const book = subject.books.find(b => b._id?.toString() === String(bookId));
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find(c => c._id?.toString() === String(chapterId));
+    if (!chapter) throw AppError.notFound('Chapter not found');
+    const topic = chapter.topics.find(t => t._id?.toString() === req.params.topicId);
+    if (!topic) throw AppError.notFound('Topic not found');
+
+    // _id/enrichment/embedding — серверные, не принимаем от клиента; прочие лишние поля отсеет strict-схема.
+    const asset = { ...req.body };
+    delete asset._id;
+    delete asset.enrichment;
+    delete asset.embedding;
+    if (!topic.assets) topic.assets = [];
+    topic.assets.push(asset);
+    await subject.save();
+
+    // Best-effort фоновой enrich изображения (llmDescription) — не блокирует ответ.
+    const created = topic.assets[topic.assets.length - 1];
+    if (created?.kind === 'image' && created.url) {
+      enrichImageAssetInBackground({
+        subjectId: String(subject._id),
+        bookId: String(book._id),
+        chapterId: String(chapter._id),
+        topicId: String(topic._id),
+        assetId: String(created._id),
+      });
+    }
+    success(res, subject, 'Asset added successfully', 201);
+  }
+
+  /** PATCH /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/assets/:assetId — replace. */
+  async updateAsset(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find(c => c._id?.toString() === req.params.chapterId);
+    if (!chapter) throw AppError.notFound('Chapter not found');
+    const topic = chapter.topics.find(t => t._id?.toString() === req.params.topicId);
+    if (!topic) throw AppError.notFound('Topic not found');
+    const idx = topic.assets?.findIndex(a => a._id?.toString() === req.params.assetId) ?? -1;
+    if (idx === -1 || !topic.assets) throw AppError.notFound('Asset not found');
+
+    const existing = topic.assets[idx];
+    const replacement = { ...req.body };
+    if (replacement.kind !== undefined && replacement.kind !== existing.kind) {
+      throw AppError.badRequest('Asset kind cannot be changed');
+    }
+    // Replace-семантика: тело заменяет ассет; _id/kind и серверные поля клиент не задаёт.
+    for (const f of SERVER_DERIVED_ASSET_FIELDS) delete replacement[f];
+    replacement._id = existing._id;
+    replacement.kind = existing.kind;
+    // Серверные поля (llmDescription/enrichment/embedding/webpUrl/width/height) переносим целиком,
+    // если изображение не менялось; при смене url — оставляем сброшенными (enrich перезапустится).
+    const urlChanged =
+      existing.kind === 'image' && String(existing.url ?? '') !== String(replacement.url ?? '');
+    if (!urlChanged) {
+      for (const f of SERVER_DERIVED_ASSET_FIELDS) {
+        if (existing[f] !== undefined) replacement[f] = existing[f];
+      }
+    }
+    topic.assets.splice(idx, 1, replacement);
+    await subject.save();
+
+    if (urlChanged) await unlinkAssetFileByUrl(existing.url);
+
+    if (replacement.kind === 'image' && replacement.url && !replacement.enrichment) {
+      enrichImageAssetInBackground({
+        subjectId: String(subject._id),
+        bookId: String(book._id),
+        chapterId: String(chapter._id),
+        topicId: String(topic._id),
+        assetId: String(existing._id),
+      });
+    }
+    success(res, subject, 'Asset updated');
+  }
+
+  /** DELETE /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/assets/:assetId */
+  async deleteAsset(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find(c => c._id?.toString() === req.params.chapterId);
+    if (!chapter) throw AppError.notFound('Chapter not found');
+    const topic = chapter.topics.find(t => t._id?.toString() === req.params.topicId);
+    if (!topic) throw AppError.notFound('Topic not found');
+    const idx = topic.assets?.findIndex(a => a._id?.toString() === req.params.assetId) ?? -1;
+    if (idx === -1 || !topic.assets) throw AppError.notFound('Asset not found');
+    const removed = topic.assets[idx];
+    topic.assets.splice(idx, 1);
+    await subject.save();
+    await unlinkAssetFileByUrl(removed.url);
+    success(res, subject, 'Asset deleted');
+  }
+
+  /** POST /subjects/:subjectId/books/:bookId/chapters/:chapterId/topics/:topicId/assets/reorder */
+  async reorderAssets(req: Request, res: Response): Promise<void> {
+    const subject = await this.findSubject(req.params.subjectId);
+    const book = subject.books.find(b => b._id?.toString() === req.params.bookId);
+    if (!book) throw AppError.notFound('Book not found');
+    const chapter = book.chapters.find(c => c._id?.toString() === req.params.chapterId);
+    if (!chapter) throw AppError.notFound('Chapter not found');
+    const topic = chapter.topics.find(t => t._id?.toString() === req.params.topicId);
+    if (!topic) throw AppError.notFound('Topic not found');
+    const { orderedAssetIds } = req.body as { orderedAssetIds?: string[] };
+    if (!Array.isArray(orderedAssetIds))
+      throw AppError.badRequest('orderedAssetIds must be an array');
+    const assets = topic.assets ?? [];
+    assertPermutation(
+      orderedAssetIds,
+      assets.map(a => a._id?.toString()),
+      'orderedAssetIds'
+    );
+    // Переупорядочиваем ТЕ ЖЕ субдокументы (сохраняя их _id) — не строим новые объекты.
+    const byId = new Map(assets.map(a => [a._id?.toString(), a]));
+    topic.assets = orderedAssetIds
+      .map(id => byId.get(id))
+      .filter((a): a is IContentAsset => Boolean(a));
+    await subject.save();
+    success(res, subject, 'Assets reordered');
+  }
+
+  /** POST /subjects/:subjectId/assets/upload — загрузка изображения ассета (multipart 'file'). */
+  async uploadAsset(req: Request, res: Response): Promise<void> {
+    const file = req.file;
+    if (!file) throw AppError.badRequest('file is required (multipart field name: file)');
+    const subjectId = req.params.subjectId;
+    const host = req.get('host') ?? '';
+    const url = `${req.protocol}://${host}${API_BASE_PATH}/uploads/subject-assets/${subjectId}/${file.filename}`;
+    success(res, { url }, 'File uploaded', 201);
   }
 }
 

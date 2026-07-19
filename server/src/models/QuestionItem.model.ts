@@ -1,5 +1,11 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
-import { IQuestionItem, IQuestion, IRelatedContent, IMatchingItem, IQuestionSourceRef } from '../types';
+import {
+  IQuestionItem,
+  IQuestion,
+  IRelatedContent,
+  IMatchingItem,
+  IQuestionSourceRef,
+} from '../types';
 import { ENT_QUESTION_TYPES } from '../utils/entQuestion.util';
 
 /**
@@ -16,7 +22,8 @@ const RelatedContentSchema = new Schema<IRelatedContent>(
     chapterId: { type: Schema.Types.ObjectId },
     topicId: { type: Schema.Types.ObjectId },
     pages: [{ type: Number, required: true }],
-    topicTitle: { type: String, trim: true }
+    topicTitle: { type: String, trim: true },
+    assetIds: [{ type: String }],
   },
   { _id: false }
 );
@@ -24,7 +31,7 @@ const RelatedContentSchema = new Schema<IRelatedContent>(
 const MatchingItemSchema = new Schema<IMatchingItem>(
   {
     id: { type: String, required: true, trim: true },
-    text: { type: String, required: true, trim: true }
+    text: { type: String, required: true, trim: true },
   },
   { _id: false }
 );
@@ -43,7 +50,7 @@ const QuestionSchema = new Schema<IQuestion>(
     acceptableKeywords: [{ type: String, trim: true }],
     referenceAnswer: { type: String, trim: true },
     aiExplanation: { type: String, required: true, trim: true, maxlength: 1200 },
-    relatedContent: { type: RelatedContentSchema, required: true }
+    relatedContent: { type: RelatedContentSchema, required: true },
   },
   { _id: false }
 );
@@ -53,7 +60,7 @@ const SourceRefSchema = new Schema<IQuestionSourceRef>(
     bookId: { type: Schema.Types.ObjectId },
     chapterId: { type: Schema.Types.ObjectId },
     topicId: { type: Schema.Types.ObjectId },
-    pages: [{ type: Number }]
+    pages: [{ type: Number }],
   },
   { _id: false }
 );
@@ -74,13 +81,13 @@ const QuestionItemSchema = new Schema<Doc>(
       promptVersion: { type: String },
       generatedAt: { type: Date },
       verified: { type: Boolean },
-      verifyReason: { type: String }
+      verifyReason: { type: String },
     },
     contentHash: { type: String, required: true },
     qualityStats: {
       timesUsed: { type: Number, default: 0 },
-      timesCorrect: { type: Number, default: 0 }
-    }
+      timesCorrect: { type: Number, default: 0 },
+    },
   },
   { timestamps: true, collection: 'question_items' }
 );
