@@ -17,7 +17,9 @@ const SPEED_SCORE_DIVISOR = 10;
  * SCORE SERVICE
  * Серверный источник «баллов» пользователя (раньше клиент считал их формулой из
  * stats). Начисление только из реальных событий: правильные ответы в тестах +
- * speed-очки solo-кахутов и live-матчей.
+ * speed-очки solo-кахутов и live-матчей. Анти-фарм: solo учитываются только
+ * ranked-попытки (practice можно повторять без лимита), live — только матчи
+ * с соперниками (participantsCount ≥ 2).
  */
 class ScoreService {
   async getMyScore(userId: string): Promise<IMyScore> {
@@ -32,11 +34,11 @@ class ScoreService {
     const uid = new Types.ObjectId(userId);
     const [soloAgg, liveAgg] = await Promise.all([
       SoloAttempt.aggregate<{ total: number }>([
-        { $match: { userId: uid } },
+        { $match: { userId: uid, attemptType: 'ranked' } },
         { $group: { _id: null, total: { $sum: '$finalScore' } } }
       ]),
       LiveMatchResult.aggregate<{ total: number }>([
-        { $match: { userId: uid } },
+        { $match: { userId: uid, participantsCount: { $gte: 2 } } },
         { $group: { _id: null, total: { $sum: '$totalScore' } } }
       ])
     ]);

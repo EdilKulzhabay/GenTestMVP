@@ -40,8 +40,12 @@ const THIRST_TESTS_PER_DAY = 10;
 const MARATHON_TESTS = 50;
 const ERUDITE_SCORE = 10_000;
 const RICH_SCORE = 100_000;
-/** Сколько последних завершённых дневных пакетов сканировать для мест в лидерборде */
+/** Сколько последних завершённых дневных пакетов учитывать для мест в лидерборде */
 const LEADERBOARD_PACKS_SCAN_LIMIT = 365;
+/** «Топ-10 дня» имеет смысл при >10 участниках пакета (иначе любой — в десятке) */
+const LEADERBOARD_TOP10_MIN_PARTICIPANTS = 11;
+/** «1 место» требует хотя бы одного соперника */
+const LEADERBOARD_FIRST_MIN_PARTICIPANTS = 2;
 
 /** «Идеальный балл по предмету» → тайтлы каталога, любой из которых засчитывается */
 const SUBJECT_ACHIEVEMENTS: ReadonlyArray<{ id: string; titles: string[] }> = [
@@ -106,8 +110,9 @@ interface HistoryEntry {
  */
 class AchievementsService {
   async getAchievements(userId: string): Promise<IAchievementsPayload> {
+    // Точная проекция: testHistory с answers/aiFeedback может весить мегабайты
     const user = await User.findById(userId)
-      .select('testHistory profileSubjectPairId createdAt')
+      .select('testHistory.subjectId testHistory.result testHistory.createdAt profileSubjectPairId createdAt')
       .lean();
     if (!user) throw AppError.notFound('User not found');
 
@@ -248,41 +253,59 @@ class AchievementsService {
   }
 
   /**
-   * Места в дневном лидерборде. Пакет засчитывается после завершения его дня
-   * (UTC — как dateKey в buildDailyPackId), чтобы место было финальным и
-   * достижение не «отзывалось». Ранжирование как в solo-лидерборде:
-   * finalScore desc, при равенстве раньше отправивший выше.
+   * Места в дневном лидерборде — одна агрегация по завершённым пакетам
+   * пользователя (день пакета прошёл, UTC — как dateKey в buildDailyPackId),
+   * чтобы место было финальным и достижение не «отзывалось». Ранжирование как
+   * в solo-лидерборде: finalScore desc, при равенстве раньше отправивший выше.
+   * Пороги: «топ-10» — при >10 участниках (победа пакета засчитывает и его),
+   * «1 место» — при ≥2. unlockedAt — самый ранний квалифицирующий пакет.
    */
   private async computeDailyLeaderboardPlaces(
     userId: string,
     rankedAttempts: Array<{ dailyPackId: string; createdAt?: Date }>
   ): Promise<{ top10: boolean; top10At?: string; first: boolean; firstAt?: string }> {
     const today = utcDayKey(new Date());
+    // rankedAttempts отсортированы по createdAt desc — берём последние N завершённых
     const finished = rankedAttempts
       .filter(a => a.createdAt && utcDayKey(new Date(a.createdAt)) < today)
-      .slice(0, LEADERBOARD_PACKS_SCAN_LIMIT);
+      .slice(0, LEADERBOARD_PACKS_SCAN_LIMIT)
+      .reverse(); // хронологически: unlockedAt = первый квалифицирующий пакет
+    if (finished.length === 0) return { top10: false, first: false };
+
+    const packs = await SoloAttempt.aggregate<{
+      _id: string;
+      total: number;
+      top: Types.ObjectId[];
+    }>([
+      { $match: { dailyPackId: { $in: finished.map(a => a.dailyPackId) }, attemptType: 'ranked' } },
+      { $sort: { finalScore: -1, createdAt: 1 } },
+      { $group: { _id: '$dailyPackId', total: { $sum: 1 }, top: { $push: '$userId' } } },
+      { $project: { total: 1, top: { $slice: ['$top', 10] } } }
+    ]);
+    const byPack = new Map(packs.map(p => [p._id, p]));
 
     let top10 = false;
     let top10At: string | undefined;
+    let first = false;
+    let firstAt: string | undefined;
     for (const attempt of finished) {
-      const top = await SoloAttempt.find({
-        dailyPackId: attempt.dailyPackId,
-        attemptType: 'ranked'
-      })
-        .select('userId')
-        .sort({ finalScore: -1, createdAt: 1 })
-        .limit(10)
-        .lean();
-      const idx = top.findIndex(t => String(t.userId) === userId);
-      if (idx >= 0 && !top10) {
+      const pack = byPack.get(attempt.dailyPackId);
+      if (!pack) continue;
+      const idx = pack.top.findIndex(u => String(u) === userId);
+      const wonPack = idx === 0 && pack.total >= LEADERBOARD_FIRST_MIN_PARTICIPANTS;
+      const inTop10 =
+        (idx >= 0 && pack.total >= LEADERBOARD_TOP10_MIN_PARTICIPANTS) || wonPack;
+      if (inTop10 && !top10) {
         top10 = true;
         top10At = iso(attempt.createdAt);
       }
-      if (idx === 0) {
-        return { top10: true, top10At, first: true, firstAt: iso(attempt.createdAt) };
+      if (wonPack && !first) {
+        first = true;
+        firstAt = iso(attempt.createdAt);
       }
+      if (top10 && first) break;
     }
-    return { top10, top10At, first: false };
+    return { top10, top10At, first, firstAt };
   }
 
   /** Идеальные баллы по конкретным предметам — по тайтлам каталога. */

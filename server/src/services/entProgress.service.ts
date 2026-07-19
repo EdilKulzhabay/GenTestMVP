@@ -39,8 +39,9 @@ interface SubjectAccuracy {
  */
 class EntProgressService {
   async getEntProgress(userId: string): Promise<IEntProgress> {
+    // Точная проекция: testHistory с answers/aiFeedback может весить мегабайты
     const user = await User.findById(userId)
-      .select('testHistory profileSubjectPairId createdAt')
+      .select('testHistory.subjectId testHistory.result testHistory.createdAt profileSubjectPairId createdAt')
       .lean();
     if (!user) throw AppError.notFound('User not found');
 
