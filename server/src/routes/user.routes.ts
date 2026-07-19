@@ -100,6 +100,16 @@ router.get(
   asyncHandler(userController.getProfileStats.bind(userController))
 );
 
+/**
+ * @route   GET /users/me/ent-progress
+ * @desc    Прогноз балла ЕНТ (шкала 140) по накопленным результатам
+ * @access  Private
+ */
+router.get(
+  '/me/ent-progress',
+  asyncHandler(userController.getEntProgress.bind(userController))
+);
+
 // Валидатор id записи истории — общий для всех под-роутов
 const testHistoryIdValidator = [
   param('testHistoryId').isMongoId().withMessage('Invalid test history ID')

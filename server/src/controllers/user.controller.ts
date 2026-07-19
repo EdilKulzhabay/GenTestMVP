@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { User, ProfileSubjectPair, Test } from '../models';
 import { success, AppError } from '../utils';
-import { testResultService, profileStatsService } from '../services';
+import { testResultService, profileStatsService, entProgressService } from '../services';
 import { ITestHistory, IUserAnswer } from '../types';
 
 class UserController {
@@ -149,6 +149,11 @@ class UserController {
   async getProfileStats(req: Request, res: Response): Promise<void> {
     const stats = await profileStatsService.getProfileStats(this.userId(req));
     success(res, stats);
+  }
+
+  /** GET /users/me/ent-progress — прогноз балла ЕНТ (шкала 140) по накопленным результатам. */
+  async getEntProgress(req: Request, res: Response): Promise<void> {
+    success(res, await entProgressService.getEntProgress(this.userId(req)));
   }
 
   /**
